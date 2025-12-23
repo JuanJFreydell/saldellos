@@ -4,6 +4,86 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { authOptions } from "../auth/[...nextauth]/route";
 import { randomUUID } from "crypto";
 
+export async function GET(request: Request) {
+  try {
+    // 1. Authenticate user
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Database not configured" },
+        { status: 500 }
+      );
+    }
+
+    // 2. Get user from database
+    const { data: user, error: userError } = await supabaseAdmin
+      .from("users")
+      .select("*")
+      .eq("email", session.user.email)
+      .single();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    if (user.status !== "active") {
+      return NextResponse.json(
+        { error: "Account is not active" },
+        { status: 403 }
+      );
+    }
+
+    // 3. Get listings metadata for the authenticated user
+    // First, get listing_ids owned by the user
+    const { data: userListings, error: userListingsError } = await supabaseAdmin
+      .from("listings")
+      .select("listing_id")
+      .eq("owner_id", user.user_id);
+
+    if (userListingsError) {
+      console.error("Error fetching user listings:", userListingsError);
+      return NextResponse.json(
+        { error: "Failed to fetch user listings" },
+        { status: 500 }
+      );
+    }
+
+    const listingIds = userListings?.map((listing) => listing.listing_id) || [];
+
+    if (listingIds.length === 0) {
+      return NextResponse.json({ listings: [] }, { status: 200 });
+    }
+
+    // Get metadata for those listings
+    const { data: metadata, error: metadataError } = await supabaseAdmin
+      .from("listings_meta_data")
+      .select("*")
+      .in("listing_id", listingIds)
+      .order("listing_date", { ascending: false });
+
+    if (metadataError) {
+      console.error("Error fetching listings metadata:", metadataError);
+      return NextResponse.json(
+        { error: "Failed to fetch listings metadata" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ listings: metadata || [] }, { status: 200 });
+  } catch (error) {
+    console.error("Error in getListings endpoint:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
 interface CreateListingRequest {
   description: string;
   photos: string[]; // Array of photo URLs

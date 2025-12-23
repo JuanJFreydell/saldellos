@@ -60,6 +60,12 @@ export default function LoggedUserPage() {
               Create Listing
             </button>
             <button
+              onClick={() => router.push("/misListados")}
+              className="rounded-full bg-green-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-600"
+            >
+              My Listings
+            </button>
+            <button
               onClick={() => signOut({ callbackUrl: "/" })}
               className="rounded-full bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
             >
