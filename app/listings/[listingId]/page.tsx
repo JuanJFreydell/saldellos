@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import Header from "../../components/Header";
 
 interface ListingData {
   listing_id: string;
@@ -104,15 +105,17 @@ export default function ListingDetailPage() {
   const { listing_data, listing_metadata } = listing;
 
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header with Back Button */}
-        <button
-          onClick={() => router.back()}
-          className="mb-6 text-blue-600 dark:text-blue-400 hover:underline"
-        >
-          ← Volver
-        </button>
+    <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
+      <Header />
+      <div className="py-8 px-4">
+        <div className="max-w-6xl mx-auto">
+          {/* Back Button */}
+          <button
+            onClick={() => router.back()}
+            className="mb-6 text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            ← Volver
+          </button>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left Column - Images */}
@@ -261,6 +264,7 @@ export default function ListingDetailPage() {
               </p>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>
