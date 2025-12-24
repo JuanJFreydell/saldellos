@@ -3,5 +3,5 @@ CREATE TABLE IF NOT EXISTS messages (
   chat_id TEXT,
   sent_by TEXT,
   time_sent TEXT,
-  messagebody TEXT
+  message_body TEXT
 );

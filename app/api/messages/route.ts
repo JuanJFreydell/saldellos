@@ -121,7 +121,7 @@ export async function GET(request: Request) {
         }
 
         // Number messages by creation time (1, 2, 3, ...)
-        // Map messagebody (lowercase from DB) to messageBody (camelCase for frontend)
+        // Map message_body (lowercase from DB) to message_body (camelCase for frontend)
         const numberedMessages = (messages || []).map((message: any, index) => ({
           ...message,
           message_body: message.message_body || message.message_body || "", // Handle both cases
@@ -155,7 +155,7 @@ export async function GET(request: Request) {
 }
 
 //---- POST MESSAGES ----
-// validates the user and takes listing_id and messageBody
+// validates the user and takes listing_id and message_body
 // checks if conversation exists between current user and listing owner
 // creates conversation if it doesn't exist
 // creates a new message entry
@@ -196,7 +196,7 @@ export async function POST(request: Request) {
 
     // 3. Parse request body
     const body = await request.json();
-    const { listing_id, message_body } = body;
+    const { listing_id, messageBody } = body;
 
     // 4. Validate required fields
     if (!listing_id || listing_id.trim() === "") {
@@ -206,9 +206,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!message_body || message_body.trim() === "") {
+    if (!messageBody || messageBody.trim() === "") {
       return NextResponse.json(
-        { error: "message_body is required" },
+        { error: "messageBody is required" },
         { status: 400 }
       );
     }
@@ -305,7 +305,7 @@ export async function POST(request: Request) {
         chat_id: conversationId,
         sent_by: userId,
         time_sent: timeSent,
-        message_body: message_body.trim(), // Use lowercase to match PostgreSQL column name
+        messagebody: messageBody.trim(), // Use lowercase messagebody to match PostgreSQL column name
       })
       .select()
       .single();
