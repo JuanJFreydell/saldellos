@@ -153,8 +153,9 @@ export async function GET(request: Request) {
 }
 
 //---- POST MESSAGES ----
-// validates the user and takes conversation_id and messageBody
-// verifies the user is a participant in the conversation
+// validates the user and takes listing_id and messageBody
+// checks if conversation exists between current user and listing owner
+// creates conversation if it doesn't exist
 // creates a new message entry
 
 export async function POST(request: Request) {
@@ -193,12 +194,12 @@ export async function POST(request: Request) {
 
     // 3. Parse request body
     const body = await request.json();
-    const { conversation_id, messageBody } = body;
+    const { listing_id, messageBody } = body;
 
     // 4. Validate required fields
-    if (!conversation_id || conversation_id.trim() === "") {
+    if (!listing_id || listing_id.trim() === "") {
       return NextResponse.json(
-        { error: "conversation_id is required" },
+        { error: "listing_id is required" },
         { status: 400 }
       );
     }
@@ -212,38 +213,94 @@ export async function POST(request: Request) {
 
     const userId = user.user_id.toString();
 
-    // 5. Verify user is a participant in the conversation
-    const { data: conversation, error: conversationError } = await supabaseAdmin
-      .from("conversations")
-      .select("*")
-      .eq("conversation_id", conversation_id)
+    // 5. Get listing to find the owner
+    const { data: listing, error: listingError } = await supabaseAdmin
+      .from("listings")
+      .select("owner_id, status")
+      .eq("listing_id", listing_id)
       .single();
 
-    if (conversationError || !conversation) {
+    if (listingError || !listing) {
       return NextResponse.json(
-        { error: "Conversation not found" },
+        { error: "Listing not found" },
         { status: 404 }
       );
     }
 
-    // Check if user is participant_1 or participant_2
-    const isParticipant =
-      conversation.participant_1 === userId ||
-      conversation.participant_2 === userId;
-
-    if (!isParticipant) {
+    // Check if listing is active
+    if (listing.status !== "active") {
       return NextResponse.json(
-        { error: "Forbidden: You are not a participant in this conversation" },
-        { status: 403 }
+        { error: "Listing is not active" },
+        { status: 400 }
       );
     }
 
-    // 6. Create message entry
+    const ownerId = listing.owner_id.toString();
+
+    // Prevent users from messaging themselves
+    if (userId === ownerId) {
+      return NextResponse.json(
+        { error: "You cannot message yourself" },
+        { status: 400 }
+      );
+    }
+
+    // 6. Check if conversation exists between current user and listing owner for this listing
+    // Search for conversations with this listing_id where either participant is the current user or owner
+    const { data: existingConversations, error: conversationSearchError } = await supabaseAdmin
+      .from("conversations")
+      .select("*")
+      .eq("listing_id", listing_id);
+
+    if (conversationSearchError) {
+      console.error("Error searching for conversation:", conversationSearchError);
+      return NextResponse.json(
+        { error: "Failed to search for conversation" },
+        { status: 500 }
+      );
+    }
+
+    // Find conversation where both participants match (current user and listing owner)
+    let conversation = existingConversations?.find(
+      (conv) =>
+        ((conv.participant_1 === userId && conv.participant_2 === ownerId) ||
+          (conv.participant_1 === ownerId && conv.participant_2 === userId))
+    );
+
+    let conversationId: string;
+
+    // 7. Create conversation if it doesn't exist
+    if (!conversation) {
+      const { data: newConversation, error: createConversationError } = await supabaseAdmin
+        .from("conversations")
+        .insert({
+          participant_1: userId,
+          participant_2: ownerId,
+          listing_id: listing_id,
+        })
+        .select()
+        .single();
+
+      if (createConversationError || !newConversation) {
+        console.error("Error creating conversation:", createConversationError);
+        return NextResponse.json(
+          { error: "Failed to create conversation" },
+          { status: 500 }
+        );
+      }
+
+      conversation = newConversation;
+      conversationId = newConversation.conversation_id.toString();
+    } else {
+      conversationId = conversation.conversation_id.toString();
+    }
+
+    // 8. Create message entry
     const timeSent = new Date().toISOString();
     const { data: message, error: messageError } = await supabaseAdmin
       .from("messages")
       .insert({
-        chat_id: conversation_id,
+        chat_id: conversationId,
         sent_by: userId,
         time_sent: timeSent,
         messageBody: messageBody.trim(),
@@ -264,6 +321,7 @@ export async function POST(request: Request) {
         success: true,
         message: "Message created successfully",
         message_id: message.message_id,
+        conversation_id: conversationId,
       },
       { status: 201 }
     );

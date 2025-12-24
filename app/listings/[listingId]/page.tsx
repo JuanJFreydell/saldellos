@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import Header from "../../components/Header";
 
 interface ListingData {
@@ -37,11 +38,16 @@ interface ListingResponse {
 export default function ListingDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { data: session, status } = useSession();
   const listingId = params.listingId as string;
 
   const [listing, setListing] = useState<ListingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showMessageForm, setShowMessageForm] = useState(false);
+  const [messageText, setMessageText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [messageSent, setMessageSent] = useState(false);
 
   useEffect(() => {
     if (listingId) {
@@ -71,6 +77,57 @@ export default function ListingDetailPage() {
       console.error("Error fetching listing:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function sendMessage() {
+    if (!messageText.trim() || sending) {
+      return;
+    }
+
+    try {
+      setSending(true);
+      setError(null);
+
+      const response = await fetch("/api/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          listing_id: listingId,
+          messageBody: messageText.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Error al enviar el mensaje");
+      }
+
+      // Success
+      setMessageText("");
+      setMessageSent(true);
+      setShowMessageForm(false);
+      
+      // Reset success message after 3 seconds
+      setTimeout(() => {
+        setMessageSent(false);
+      }, 3000);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Ocurrió un error al enviar el mensaje"
+      );
+      console.error("Error sending message:", err);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
     }
   }
 
@@ -142,7 +199,7 @@ export default function ListingDetailPage() {
               <h1 className="text-3xl font-bold text-black dark:text-zinc-50 mb-4">
                 {listing_metadata.title || listing_data.title}
               </h1>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-4">
                 <span className="text-4xl font-bold text-blue-600 dark:text-blue-400">
                   ${listing_metadata.price}
                 </span>
@@ -156,6 +213,66 @@ export default function ListingDetailPage() {
                   {listing_metadata.status === "active" ? "Activo" : listing_metadata.status}
                 </span>
               </div>
+              {/* Contact Seller Button */}
+              {status === "authenticated" && session ? (
+                <div>
+                  {!showMessageForm ? (
+                    <button
+                      onClick={() => setShowMessageForm(true)}
+                      className="w-full rounded-lg bg-green-500 px-6 py-3 text-white font-medium hover:bg-green-600 transition-colors"
+                    >
+                      Contactar al vendedor
+                    </button>
+                  ) : (
+                    <div className="space-y-3">
+                      <textarea
+                        value={messageText}
+                        onChange={(e) => setMessageText(e.target.value)}
+                        onKeyPress={handleKeyPress}
+                        placeholder="Escribe tu mensaje al vendedor..."
+                        rows={4}
+                        className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-black dark:text-zinc-50 px-4 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={sendMessage}
+                          disabled={!messageText.trim() || sending}
+                          className="flex-1 rounded-lg bg-green-500 px-6 py-2 text-white font-medium hover:bg-green-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        >
+                          {sending ? "Enviando..." : "Enviar"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowMessageForm(false);
+                            setMessageText("");
+                            setError(null);
+                          }}
+                          className="rounded-lg bg-gray-500 px-4 py-2 text-white font-medium hover:bg-gray-600 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                      {error && (
+                        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={() => router.push("/")}
+                  className="w-full rounded-lg bg-green-500 px-6 py-3 text-white font-medium hover:bg-green-600 transition-colors"
+                >
+                  Inicia sesión para contactar al vendedor
+                </button>
+              )}
+              {messageSent && (
+                <div className="mt-3 p-3 bg-green-100 dark:bg-green-900 rounded-lg">
+                  <p className="text-sm text-green-800 dark:text-green-200">
+                    ✓ Mensaje enviado exitosamente
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Category and Date */}
