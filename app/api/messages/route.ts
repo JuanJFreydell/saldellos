@@ -239,8 +239,12 @@ export async function POST(request: Request) {
 
     const ownerId = listing.owner_id.toString();
 
+    // Normalize IDs for consistent comparison (trim whitespace, ensure string format)
+    const normalizedUserId = userId.trim();
+    const normalizedOwnerId = ownerId.trim();
+
     // 6. Check if conversation exists between current user and listing owner for this listing
-    // Search for conversations with this listing_id where either participant is the current user or owner
+    // Search for conversations with this listing_id
     const { data: existingConversations, error: conversationSearchError } = await supabaseAdmin
       .from("conversations")
       .select("*")
@@ -255,11 +259,26 @@ export async function POST(request: Request) {
     }
 
     // Find conversation where both participants match (current user and listing owner)
-    let conversation = existingConversations?.find(
-      (conv) =>
-        ((conv.participant_1 === userId && conv.participant_2 === ownerId) ||
-          (conv.participant_1 === ownerId && conv.participant_2 === userId))
-    );
+    // Normalize participant IDs from database before comparison
+    let conversation = existingConversations?.find((conv) => {
+      const p1 = String(conv.participant_1 || "").trim();
+      const p2 = String(conv.participant_2 || "").trim();
+      
+      // Check if both participants match (order doesn't matter)
+      return (
+        (p1 === normalizedUserId && p2 === normalizedOwnerId) ||
+        (p1 === normalizedOwnerId && p2 === normalizedUserId)
+      );
+    });
+
+    // Prevent users from messaging themselves UNLESS a conversation already exists
+    // This allows sellers to respond to existing conversations about their listings
+    if (userId === ownerId && !conversation) {
+      return NextResponse.json(
+        { error: "You cannot message yourself" },
+        { status: 400 }
+      );
+    }
 
     let conversationId: string;
 
@@ -268,8 +287,8 @@ export async function POST(request: Request) {
       const { data: newConversation, error: createConversationError } = await supabaseAdmin
         .from("conversations")
         .insert({
-          participant_1: userId,
-          participant_2: ownerId,
+          participant_1: normalizedUserId,
+          participant_2: normalizedOwnerId,
           listing_id: listing_id,
         })
         .select()
