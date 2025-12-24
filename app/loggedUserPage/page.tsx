@@ -66,6 +66,12 @@ export default function LoggedUserPage() {
               My Listings
             </button>
             <button
+              onClick={() => router.push("/mensajes")}
+              className="rounded-full bg-purple-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-600"
+            >
+              Mensajes
+            </button>
+            <button
               onClick={() => signOut({ callbackUrl: "/" })}
               className="rounded-full bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
             >

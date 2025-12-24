@@ -19,6 +19,12 @@ export default function Header() {
         {status === "authenticated" && session ? (
           <div className="flex gap-2">
             <button
+              onClick={() => router.push("/mensajes")}
+              className="rounded-full bg-purple-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-600"
+            >
+              Mensajes
+            </button>
+            <button
               onClick={() => router.push("/loggedUserPage")}
               className="rounded-full bg-blue-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600"
             >

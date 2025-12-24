@@ -153,20 +153,119 @@ export async function GET(request: Request) {
 }
 
 //---- POST MESSAGES ----
-// takes in a user and a listing.id as parameters.
-// checks if the listing is active
-// gets the user_id in the owner field of the listing
-// checks if there are conversations between the user sending the message and the person listing
-// the product that includes that lisitng_id,
-// if so then it posts the message using that conversation_id,
-// else creates a new conversation_id, and posts the message using that new conversation_id
+// validates the user and takes conversation_id and messageBody
+// verifies the user is a participant in the conversation
+// creates a new message entry
 
 export async function POST(request: Request) {
   try {
-    // TODO: Implement post message functionality
+    // 1. Authenticate user
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Database not configured" },
+        { status: 500 }
+      );
+    }
+
+    // 2. Get user from database
+    const { data: user, error: userError } = await supabaseAdmin
+      .from("users")
+      .select("*")
+      .eq("email", session.user.email)
+      .single();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    if (user.status !== "active") {
+      return NextResponse.json(
+        { error: "Account is not active" },
+        { status: 403 }
+      );
+    }
+
+    // 3. Parse request body
+    const body = await request.json();
+    const { conversation_id, messageBody } = body;
+
+    // 4. Validate required fields
+    if (!conversation_id || conversation_id.trim() === "") {
+      return NextResponse.json(
+        { error: "conversation_id is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!messageBody || messageBody.trim() === "") {
+      return NextResponse.json(
+        { error: "messageBody is required" },
+        { status: 400 }
+      );
+    }
+
+    const userId = user.user_id.toString();
+
+    // 5. Verify user is a participant in the conversation
+    const { data: conversation, error: conversationError } = await supabaseAdmin
+      .from("conversations")
+      .select("*")
+      .eq("conversation_id", conversation_id)
+      .single();
+
+    if (conversationError || !conversation) {
+      return NextResponse.json(
+        { error: "Conversation not found" },
+        { status: 404 }
+      );
+    }
+
+    // Check if user is participant_1 or participant_2
+    const isParticipant =
+      conversation.participant_1 === userId ||
+      conversation.participant_2 === userId;
+
+    if (!isParticipant) {
+      return NextResponse.json(
+        { error: "Forbidden: You are not a participant in this conversation" },
+        { status: 403 }
+      );
+    }
+
+    // 6. Create message entry
+    const timeSent = new Date().toISOString();
+    const { data: message, error: messageError } = await supabaseAdmin
+      .from("messages")
+      .insert({
+        chat_id: conversation_id,
+        sent_by: userId,
+        time_sent: timeSent,
+        messageBody: messageBody.trim(),
+      })
+      .select()
+      .single();
+
+    if (messageError) {
+      console.error("Error creating message:", messageError);
+      return NextResponse.json(
+        { error: "Failed to create message" },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
-      { message: "Not implemented yet" },
-      { status: 501 }
+      {
+        success: true,
+        message: "Message created successfully",
+        message_id: message.message_id,
+      },
+      { status: 201 }
     );
   } catch (error) {
     console.error("Error in postMessage endpoint:", error);
