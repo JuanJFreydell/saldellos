@@ -395,8 +395,17 @@ export default function Home() {
 }
 
 function ListingCard({ listing }: { listing: ListingMetadata }) {
+  const router = useRouter();
+
+  const handleCardClick = () => {
+    router.push(`/listings/${listing.listing_id}`);
+  };
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+    <div
+      onClick={handleCardClick}
+      className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow cursor-pointer"
+    >
       {/* Thumbnail */}
       <div className="w-full h-48 bg-gray-200 dark:bg-gray-700">
         {listing.thumbnail ? (
