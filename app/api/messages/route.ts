@@ -121,8 +121,10 @@ export async function GET(request: Request) {
         }
 
         // Number messages by creation time (1, 2, 3, ...)
-        const numberedMessages = (messages || []).map((message, index) => ({
+        // Map messagebody (lowercase from DB) to messageBody (camelCase for frontend)
+        const numberedMessages = (messages || []).map((message: any, index) => ({
           ...message,
+          message_body: message.message_body || message.message_body || "", // Handle both cases
           message_number: index + 1,
         }));
 
@@ -194,7 +196,7 @@ export async function POST(request: Request) {
 
     // 3. Parse request body
     const body = await request.json();
-    const { listing_id, messageBody } = body;
+    const { listing_id, message_body } = body;
 
     // 4. Validate required fields
     if (!listing_id || listing_id.trim() === "") {
@@ -204,9 +206,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!messageBody || messageBody.trim() === "") {
+    if (!message_body || message_body.trim() === "") {
       return NextResponse.json(
-        { error: "messageBody is required" },
+        { error: "message_body is required" },
         { status: 400 }
       );
     }
@@ -303,7 +305,7 @@ export async function POST(request: Request) {
         chat_id: conversationId,
         sent_by: userId,
         time_sent: timeSent,
-        messageBody: messageBody.trim(),
+        message_body: message_body.trim(), // Use lowercase to match PostgreSQL column name
       })
       .select()
       .single();
