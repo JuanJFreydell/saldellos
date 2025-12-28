@@ -65,6 +65,20 @@ export default function MensagesPage() {
     }
   }, [status, router]);
 
+  // Poll for new messages every 5 seconds
+  useEffect(() => {
+    if (status !== "authenticated") {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      fetchConversations(true); // Silent polling - don't show loading spinner
+    }, 5000); // Poll every 5 seconds
+
+    // Cleanup interval on unmount
+    return () => clearInterval(intervalId);
+  }, [status]);
+
   useEffect(() => {
     // Scroll to bottom when messages change
     if (messagesEndRef.current) {
@@ -72,9 +86,12 @@ export default function MensagesPage() {
     }
   }, [selectedConversation?.messages]);
 
-  async function fetchConversations() {
+  async function fetchConversations(silent = false) {
     try {
-      setLoading(true);
+      // Only show loading spinner on initial load, not on polling updates
+      if (!silent) {
+        setLoading(true);
+      }
       setError(null);
 
       const response = await fetch("/api/messages");
@@ -83,11 +100,14 @@ export default function MensagesPage() {
       }
 
       const data: ConversationsResponse = await response.json();
-      setConversations(data.conversations || []);
+      const newConversations = data.conversations || [];
+      
+      // Update conversations state
+      setConversations(newConversations);
 
       // If a conversation is selected, update it with fresh data
       if (selectedConversation) {
-        const updated = data.conversations.find(
+        const updated = newConversations.find(
           (c) => c.conversation_id === selectedConversation.conversation_id
         );
         if (updated) {
@@ -95,10 +115,15 @@ export default function MensagesPage() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      // Only show error on initial load, not on polling failures
+      if (!silent) {
+        setError(err instanceof Error ? err.message : "An error occurred");
+      }
       console.error("Error fetching conversations:", err);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -229,7 +254,7 @@ export default function MensagesPage() {
           <div className="text-center">
             <p className="text-lg text-red-600 dark:text-red-400 mb-4">{error}</p>
             <button
-              onClick={fetchConversations}
+              onClick={() => fetchConversations()}
               className="rounded-lg bg-blue-500 px-6 py-2 text-white hover:bg-blue-600 transition-colors"
             >
               Reintentar
