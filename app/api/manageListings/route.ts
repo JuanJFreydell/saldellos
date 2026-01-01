@@ -43,10 +43,10 @@ export async function GET(request: Request) {
     const listingId = searchParams.get("listing_id");
 
     if (listingId) {
-      // Fetch single listing with full details
+      // Verify ownership first
       const { data: listing, error: listingError } = await supabaseAdmin
         .from("listings")
-        .select("*")
+        .select("owner_id")
         .eq("listing_id", listingId)
         .single();
 
@@ -57,7 +57,6 @@ export async function GET(request: Request) {
         );
       }
 
-      // Verify ownership
       if (listing.owner_id !== user.user_id) {
         return NextResponse.json(
           { error: "Forbidden: You are not the owner of this listing" },
@@ -65,36 +64,30 @@ export async function GET(request: Request) {
         );
       }
 
-      // Get metadata
-      const { data: metadata, error: metaError } = await supabaseAdmin
-        .from("listings_meta_data")
-        .select("*")
-        .eq("listing_id", listingId)
-        .single();
+      // Use shared function to get full listing data
+      const { getListingById } = await import("@/lib/getListingById");
+      const listingData = await getListingById(listingId);
 
-      if (metaError) {
-        console.error("Error fetching listing metadata:", metaError);
+      if (!listingData) {
         return NextResponse.json(
-          { error: "Failed to fetch listing metadata" },
+          { error: "Failed to fetch listing data" },
           { status: 500 }
         );
       }
 
-      return NextResponse.json({
-        listing: {
-          ...listing,
-          ...metadata,
-          photos: metadata?.thumbnail ? [metadata.thumbnail] : [],
-        },
-      });
+      return NextResponse.json({ listing: listingData });
     }
 
-    // 4. Get listings metadata for the authenticated user
-    // First, get listing_ids owned by the user
-    const { data: userListings, error: userListingsError } = await supabaseAdmin
+    // 4. Get listings for the authenticated user
+    // TypeScript: supabaseAdmin is guaranteed to be non-null here due to early return above
+    const adminClient = supabaseAdmin!;
+
+    // Fetch listings with basic info, ordered by create_date
+    const { data: userListings, error: userListingsError } = await adminClient
       .from("listings")
-      .select("listing_id")
-      .eq("owner_id", user.user_id);
+      .select("listing_id, title, thumbnail, price, create_date, status, subcategory_id")
+      .eq("owner_id", user.user_id)
+      .order("create_date", { ascending: false });
 
     if (userListingsError) {
       console.error("Error fetching user listings:", userListingsError);
@@ -104,28 +97,55 @@ export async function GET(request: Request) {
       );
     }
 
-    const listingIds = userListings?.map((listing) => listing.listing_id) || [];
-
-    if (listingIds.length === 0) {
+    if (!userListings || userListings.length === 0) {
       return NextResponse.json({ listings: [] }, { status: 200 });
     }
 
-    // Get metadata for those listings
-    const { data: metadata, error: metadataError } = await supabaseAdmin
-      .from("listings_meta_data")
-      .select("*")
-      .in("listing_id", listingIds)
-      .order("listing_date", { ascending: false });
+    // Fetch additional data for each listing (addresses, categories)
+    const listingsWithDetails = await Promise.all(
+      userListings.map(async (listing) => {
+        // Get address for coordinates
+        const { data: address } = await adminClient
+          .from("listing_addresses")
+          .select("coordinates")
+          .eq("listing_id", listing.listing_id)
+          .single();
 
-    if (metadataError) {
-      console.error("Error fetching listings metadata:", metadataError);
-      return NextResponse.json(
-        { error: "Failed to fetch listings metadata" },
-        { status: 500 }
-      );
-    }
+        // Get category
+        let category = null;
+        if (listing.subcategory_id) {
+          const { data: subcategoryData } = await adminClient
+            .from("listing_subcategories")
+            .select("category_id")
+            .eq("subcategory_id", listing.subcategory_id)
+            .single();
 
-    return NextResponse.json({ listings: metadata || [] }, { status: 200 });
+          if (subcategoryData?.category_id) {
+            const { data: categoryData } = await adminClient
+              .from("listing_categories")
+              .select("category_name")
+              .eq("category_id", subcategoryData.category_id)
+              .single();
+
+            category = categoryData?.category_name || null;
+          }
+        }
+
+        // Return format matching frontend expectations
+        return {
+          listing_id: listing.listing_id,
+          title: listing.title,
+          thumbnail: listing.thumbnail,
+          coordinates: address?.coordinates || null,
+          price: listing.price,
+          listing_date: listing.create_date, // Map create_date to listing_date for frontend compatibility
+          status: listing.status,
+          category: category,
+        };
+      })
+    );
+
+    return NextResponse.json({ listings: listingsWithDetails }, { status: 200 });
   } catch (error) {
     console.error("Error in getListings endpoint:", error);
     return NextResponse.json(
@@ -136,13 +156,20 @@ export async function GET(request: Request) {
 }
 
 interface CreateListingRequest {
+  owner_id: string;
   description: string;
-  photos: string[]; // Array of photo URLs
-  coordinates: string;
-  address: string;
-  title: string;
   price: string;
-  category: string;
+  subcategory_id: string;
+  title: string;
+  thumbnail: string; // Thumbnail URL
+  pictures?: string[]; // Array of photo URLs (optional)
+  material_ids?: string[]; // Array of material IDs (optional)
+  address_line_1: string;
+  address_line_2?: string; // Optional
+  neighborhood?: string; // Neighborhood name (optional, requires city)
+  city?: string; // City name (optional, requires country)
+  country: string; // Country name (required)
+  coordinates: string;
 }
 
 export async function POST(request: Request) {
@@ -161,8 +188,11 @@ export async function POST(request: Request) {
       );
     }
 
+    // TypeScript: supabaseAdmin is guaranteed to be non-null here
+    const adminClient = supabaseAdmin;
+
     // 2. Get user from database and validate active status
-    const { data: user, error: userError } = await supabaseAdmin
+    const { data: user, error: userError } = await adminClient
       .from("users")
       .select("*")
       .eq("email", session.user.email)
@@ -183,30 +213,24 @@ export async function POST(request: Request) {
     const body: CreateListingRequest = await request.json();
 
     // Validate required fields
+    if (!body.owner_id || body.owner_id.trim() === "") {
+      return NextResponse.json(
+        { error: "owner_id is required" },
+        { status: 400 }
+      );
+    }
+
+    // Verify owner_id matches authenticated user
+    if (body.owner_id !== user.user_id.toString()) {
+      return NextResponse.json(
+        { error: "owner_id must match authenticated user" },
+        { status: 403 }
+      );
+    }
+
     if (!body.description || body.description.trim() === "") {
       return NextResponse.json(
         { error: "Description is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!body.photos || !Array.isArray(body.photos) || body.photos.length === 0) {
-      return NextResponse.json(
-        { error: "At least one photo is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!body.coordinates || body.coordinates.trim() === "") {
-      return NextResponse.json(
-        { error: "Coordinates are required" },
-        { status: 400 }
-      );
-    }
-
-    if (!body.title || body.title.trim() === "") {
-      return NextResponse.json(
-        { error: "Title is required" },
         { status: 400 }
       );
     }
@@ -218,74 +242,263 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!body.category || body.category.trim() === "") {
+    if (!body.subcategory_id || body.subcategory_id.trim() === "") {
       return NextResponse.json(
-        { error: "Category is required" },
+        { error: "subcategory_id is required" },
         { status: 400 }
       );
     }
 
-    if (!body.address || body.address.trim() === "") {
+    if (!body.title || body.title.trim() === "") {
       return NextResponse.json(
-        { error: "Address is required" },
+        { error: "Title is required" },
         { status: 400 }
       );
     }
 
-    // 4. Generate listing_id (same for both tables)
+    if (!body.thumbnail || body.thumbnail.trim() === "") {
+      return NextResponse.json(
+        { error: "Thumbnail URL is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!body.address_line_1 || body.address_line_1.trim() === "") {
+      return NextResponse.json(
+        { error: "address_line_1 is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!body.coordinates || body.coordinates.trim() === "") {
+      return NextResponse.json(
+        { error: "Coordinates are required" },
+        { status: 400 }
+      );
+    }
+
+    if (!body.country || body.country.trim() === "") {
+      return NextResponse.json(
+        { error: "country is required" },
+        { status: 400 }
+      );
+    }
+
+    // Validation: city requires country
+    if (body.city && !body.country) {
+      return NextResponse.json(
+        { error: "country is required when city is provided" },
+        { status: 400 }
+      );
+    }
+
+    // Validation: neighborhood requires city
+    if (body.neighborhood && !body.city) {
+      return NextResponse.json(
+        { error: "city is required when neighborhood is provided" },
+        { status: 400 }
+      );
+    }
+
+    // 4. Validate hierarchy: country → city → neighborhood
+    let neighborhoodId: string | null = null;
+
+    // Get country_id
+    const { data: countryData, error: countryError } = await adminClient
+      .from("countries")
+      .select("country_id")
+      .ilike("country_name", body.country.trim())
+      .single();
+
+    if (countryError || !countryData) {
+      return NextResponse.json(
+        { error: "Country not found" },
+        { status: 404 }
+      );
+    }
+
+    const countryId = countryData.country_id.toString();
+
+    // If city is provided, validate it belongs to country
+    let cityId: string | null = null;
+    if (body.city && body.city.trim() !== "") {
+      const { data: cityData, error: cityError } = await adminClient
+        .from("listing_cities")
+        .select("city_id")
+        .ilike("city_name", body.city.trim())
+        .eq("country_id", countryId)
+        .single();
+
+      if (cityError || !cityData) {
+        return NextResponse.json(
+          { error: "City not found in the specified country" },
+          { status: 404 }
+        );
+      }
+
+      cityId = cityData.city_id.toString();
+
+      // If neighborhood is provided, validate it belongs to city
+      if (body.neighborhood && body.neighborhood.trim() !== "") {
+        const { data: neighborhoodData, error: neighborhoodError } = await adminClient
+          .from("listing_neighborhoods")
+          .select("neighborhood_id")
+          .ilike("neighborhood_name", body.neighborhood.trim())
+          .eq("city_id", cityId)
+          .single();
+
+        if (neighborhoodError || !neighborhoodData) {
+          return NextResponse.json(
+            { error: "Neighborhood not found in the specified city" },
+            { status: 404 }
+          );
+        }
+
+        neighborhoodId = neighborhoodData.neighborhood_id.toString();
+      }
+    }
+
+    // 5. Validate material_ids if provided
+    const validMaterialIds: string[] = [];
+    if (body.material_ids && Array.isArray(body.material_ids) && body.material_ids.length > 0) {
+      // Check which material_ids exist in listing_standard_materials
+      const { data: validMaterials, error: materialsError } = await adminClient
+        .from("listing_standard_materials")
+        .select("material_id")
+        .in("material_id", body.material_ids);
+
+      if (materialsError) {
+        console.error("Error validating materials:", materialsError);
+        return NextResponse.json(
+          { error: "Failed to validate materials" },
+          { status: 500 }
+        );
+      }
+
+      if (validMaterials) {
+        validMaterialIds.push(...validMaterials.map((m: any) => m.material_id));
+      }
+    }
+
+    // 6. Generate listing_id
     const listingId = randomUUID();
-    const listingDate = new Date().toISOString();
+    const createDate = new Date().toISOString();
 
-    // 5. Create entry in listings_meta_data
-    const { error: metaError } = await supabaseAdmin
-      .from("listings_meta_data")
-      .insert({
-        listing_id: listingId,
-        title: body.title,
-        thumbnail: body.photos[0], // Use first photo as thumbnail
-        coordinates: body.coordinates,
-        price: body.price,
-        listing_date: listingDate,
-        status: "active",
-        category: body.category,
-      });
-
-    if (metaError) {
-      console.error("Error creating listing meta data:", metaError);
-      return NextResponse.json(
-        { error: "Failed to create listing meta data" },
-        { status: 500 }
-      );
-    }
-
-    // 6. Create entry in listings (listing_data)
-    const { data: listingData, error: listingError } = await supabaseAdmin
+    // 7. Create listing entry
+    const { data: listingData, error: listingError } = await adminClient
       .from("listings")
       .insert({
         listing_id: listingId,
-        owner_id: user.user_id,
-        title: body.title,
+        owner_id: body.owner_id,
         description: body.description,
-        address: body.address,
-        neighborhood_id: null, // Not provided in requirements
-        listing_date: listingDate,
-        number_of_prints: "0",
-        number_of_visits: "0",
+        price: body.price,
+        create_date: createDate,
+        subcategory_id: body.subcategory_id,
+        title: body.title,
         status: "active",
+        thumbnail: body.thumbnail,
       })
       .select()
       .single();
 
     if (listingError) {
       console.error("Error creating listing:", listingError);
-      // Rollback: delete meta data if listing creation fails
-      await supabaseAdmin
-        .from("listings_meta_data")
-        .delete()
-        .eq("listing_id", listingId);
-      
       return NextResponse.json(
         { error: "Failed to create listing" },
+        { status: 500 }
+      );
+    }
+
+    // 8. Create listing_materials entries for valid materials
+    if (validMaterialIds.length > 0) {
+      const materialEntries = validMaterialIds.map((materialId) => ({
+        listing_id: listingId,
+        material_id: materialId,
+      }));
+
+      const { error: materialsInsertError } = await adminClient
+        .from("listing_materials")
+        .insert(materialEntries);
+
+      if (materialsInsertError) {
+        console.error("Error creating listing materials:", materialsInsertError);
+        // Rollback: delete listing
+        await adminClient
+          .from("listings")
+          .delete()
+          .eq("listing_id", listingId);
+
+        return NextResponse.json(
+          { error: "Failed to create listing materials" },
+          { status: 500 }
+        );
+      }
+    }
+
+    // 9. Create listing_photos entries if pictures provided
+    if (body.pictures && Array.isArray(body.pictures) && body.pictures.length > 0) {
+      const photoEntries = body.pictures.map((photoUrl, index) => ({
+        listing_id: listingId,
+        photo_url: photoUrl,
+        photo_order: index,
+      }));
+
+      const { error: photosInsertError } = await adminClient
+        .from("listing_photos")
+        .insert(photoEntries);
+
+      if (photosInsertError) {
+        console.error("Error creating listing photos:", photosInsertError);
+        // Rollback: delete listing, materials, and photos
+        await adminClient
+          .from("listing_materials")
+          .delete()
+          .eq("listing_id", listingId);
+        await adminClient
+          .from("listing_photos")
+          .delete()
+          .eq("listing_id", listingId);
+        await adminClient
+          .from("listings")
+          .delete()
+          .eq("listing_id", listingId);
+
+        return NextResponse.json(
+          { error: "Failed to create listing photos" },
+          { status: 500 }
+        );
+      }
+    }
+
+    // 10. Create listing_address entry
+    const { error: addressError } = await adminClient
+      .from("listing_addresses")
+      .insert({
+        listing_id: listingId,
+        address_line_1: body.address_line_1,
+        address_line_2: body.address_line_2 || null,
+        neighborhood_id: neighborhoodId,
+        coordinates: body.coordinates,
+      });
+
+    if (addressError) {
+      console.error("Error creating listing address:", addressError);
+      // Rollback: delete listing, materials, and photos
+      await adminClient
+        .from("listing_materials")
+        .delete()
+        .eq("listing_id", listingId);
+      await adminClient
+        .from("listing_photos")
+        .delete()
+        .eq("listing_id", listingId);
+      await adminClient
+        .from("listings")
+        .delete()
+        .eq("listing_id", listingId);
+
+      return NextResponse.json(
+        { error: "Failed to create listing address" },
         { status: 500 }
       );
     }
@@ -374,21 +587,41 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // 6. Delete from listings_meta_data first
-    const { error: metaDeleteError } = await supabaseAdmin
-      .from("listings_meta_data")
+    // 6. Delete related data first (in order to respect foreign key constraints)
+    // Delete photos
+    const { error: photosDeleteError } = await supabaseAdmin
+      .from("listing_photos")
       .delete()
       .eq("listing_id", listingId);
 
-    if (metaDeleteError) {
-      console.error("Error deleting listing meta data:", metaDeleteError);
-      return NextResponse.json(
-        { error: "Failed to delete listing meta data" },
-        { status: 500 }
-      );
+    if (photosDeleteError) {
+      console.error("Error deleting listing photos:", photosDeleteError);
+      // Continue with deletion even if photos deletion fails
     }
 
-    // 7. Delete from listings table
+    // Delete materials
+    const { error: materialsDeleteError } = await supabaseAdmin
+      .from("listing_materials")
+      .delete()
+      .eq("listing_id", listingId);
+
+    if (materialsDeleteError) {
+      console.error("Error deleting listing materials:", materialsDeleteError);
+      // Continue with deletion even if materials deletion fails
+    }
+
+    // Delete address
+    const { error: addressDeleteError } = await supabaseAdmin
+      .from("listing_addresses")
+      .delete()
+      .eq("listing_id", listingId);
+
+    if (addressDeleteError) {
+      console.error("Error deleting listing address:", addressDeleteError);
+      // Continue with deletion even if address deletion fails
+    }
+
+    // 7. Delete from listings table (main table)
     const { error: listingDeleteError } = await supabaseAdmin
       .from("listings")
       .delete()
@@ -490,40 +723,145 @@ export async function PATCH(request: Request) {
 
     // 5. Build partial update payloads
     const listingUpdates: Record<string, unknown> = {};
-    const metaUpdates: Record<string, unknown> = {};
+    const addressUpdates: Record<string, unknown> = {};
 
     if (body.title !== undefined) {
       listingUpdates.title = body.title;
-      metaUpdates.title = body.title;
     }
 
     if (body.description !== undefined) {
       listingUpdates.description = body.description;
     }
 
-    if (body.address !== undefined) {
-      listingUpdates.address = body.address;
+    if (body.price !== undefined) {
+      listingUpdates.price = body.price;
+    }
+
+    if (body.thumbnail !== undefined) {
+      listingUpdates.thumbnail = body.thumbnail;
+    }
+
+    if (body.address_line_1 !== undefined) {
+      addressUpdates.address_line_1 = body.address_line_1;
+    }
+
+    if (body.address_line_2 !== undefined) {
+      addressUpdates.address_line_2 = body.address_line_2;
     }
 
     if (body.coordinates !== undefined) {
-      metaUpdates.coordinates = body.coordinates;
+      addressUpdates.coordinates = body.coordinates;
     }
 
-    if (body.price !== undefined) {
-      metaUpdates.price = body.price;
+    // Handle photos update
+    if (body.pictures && Array.isArray(body.pictures) && body.pictures.length > 0) {
+      // Delete existing photos and insert new ones
+      await supabaseAdmin
+        .from("listing_photos")
+        .delete()
+        .eq("listing_id", listingId);
+
+      const photoEntries = body.pictures.map((photoUrl, index) => ({
+        listing_id: listingId,
+        photo_url: photoUrl,
+        photo_order: index,
+      }));
+
+      const { error: photosInsertError } = await supabaseAdmin
+        .from("listing_photos")
+        .insert(photoEntries);
+
+      if (photosInsertError) {
+        console.error("Error updating listing photos:", photosInsertError);
+        return NextResponse.json(
+          { error: "Failed to update listing photos" },
+          { status: 500 }
+        );
+      }
+
+      // Update thumbnail to first photo
+      listingUpdates.thumbnail = body.pictures[0];
     }
 
-    if (body.category !== undefined) {
-      metaUpdates.category = body.category;
-    }
+    // Handle neighborhood update if provided (requires hierarchy validation)
+    if (body.neighborhood !== undefined || body.city !== undefined || body.country !== undefined) {
+      // Validate hierarchy if any location field is being updated
+      const country = body.country;
+      const city = body.city;
+      const neighborhood = body.neighborhood;
 
-    if (body.photos && Array.isArray(body.photos) && body.photos.length > 0) {
-      metaUpdates.thumbnail = body.photos[0];
+      if (neighborhood && !city) {
+        return NextResponse.json(
+          { error: "city is required when updating neighborhood" },
+          { status: 400 }
+        );
+      }
+
+      if (city && !country) {
+        return NextResponse.json(
+          { error: "country is required when updating city" },
+          { status: 400 }
+        );
+      }
+
+      let neighborhoodId: string | null = null;
+
+      if (country) {
+        const { data: countryData } = await supabaseAdmin
+          .from("countries")
+          .select("country_id")
+          .ilike("country_name", country.trim())
+          .single();
+
+        if (!countryData) {
+          return NextResponse.json(
+            { error: "Country not found" },
+            { status: 404 }
+          );
+        }
+
+        if (city) {
+          const { data: cityData } = await supabaseAdmin
+            .from("listing_cities")
+            .select("city_id")
+            .ilike("city_name", city.trim())
+            .eq("country_id", countryData.country_id.toString())
+            .single();
+
+          if (!cityData) {
+            return NextResponse.json(
+              { error: "City not found in the specified country" },
+              { status: 404 }
+            );
+          }
+
+          if (neighborhood) {
+            const { data: neighborhoodData } = await supabaseAdmin
+              .from("listing_neighborhoods")
+              .select("neighborhood_id")
+              .ilike("neighborhood_name", neighborhood.trim())
+              .eq("city_id", cityData.city_id.toString())
+              .single();
+
+            if (!neighborhoodData) {
+              return NextResponse.json(
+                { error: "Neighborhood not found in the specified city" },
+                { status: 404 }
+              );
+            }
+
+            neighborhoodId = neighborhoodData.neighborhood_id.toString();
+          }
+        }
+      }
+
+      addressUpdates.neighborhood_id = neighborhoodId;
     }
 
     if (
       Object.keys(listingUpdates).length === 0 &&
-      Object.keys(metaUpdates).length === 0
+      Object.keys(addressUpdates).length === 0 &&
+      !(body.pictures && Array.isArray(body.pictures) && body.pictures.length > 0)
     ) {
       return NextResponse.json(
         { error: "No fields provided to update" },
@@ -532,21 +870,6 @@ export async function PATCH(request: Request) {
     }
 
     // 6. Apply updates
-    if (Object.keys(metaUpdates).length > 0) {
-      const { error: metaUpdateError } = await supabaseAdmin
-        .from("listings_meta_data")
-        .update(metaUpdates)
-        .eq("listing_id", listingId);
-
-      if (metaUpdateError) {
-        console.error("Error updating listing meta data:", metaUpdateError);
-        return NextResponse.json(
-          { error: "Failed to update listing meta data" },
-          { status: 500 }
-        );
-      }
-    }
-
     if (Object.keys(listingUpdates).length > 0) {
       const { error: listingUpdateError } = await supabaseAdmin
         .from("listings")
@@ -557,6 +880,21 @@ export async function PATCH(request: Request) {
         console.error("Error updating listing:", listingUpdateError);
         return NextResponse.json(
           { error: "Failed to update listing" },
+          { status: 500 }
+        );
+      }
+    }
+
+    if (Object.keys(addressUpdates).length > 0) {
+      const { error: addressUpdateError } = await supabaseAdmin
+        .from("listing_addresses")
+        .update(addressUpdates)
+        .eq("listing_id", listingId);
+
+      if (addressUpdateError) {
+        console.error("Error updating listing address:", addressUpdateError);
+        return NextResponse.json(
+          { error: "Failed to update listing address" },
           { status: 500 }
         );
       }

@@ -6,112 +6,166 @@ import Header from "./components/Header";
 
 interface ListingMetadata {
   listing_id: string;
+  description: string;
   title: string;
-  thumbnail: string;
-  coordinates: string;
+  subcategory: string | null;
+  category: string | null;
   price: string;
-  listing_date: string;
-  status: string;
-  category: string;
+  thumbnail: string;
+  coordinates: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  country: string | null;
 }
 
-// City and neighborhood coordinates mapping
-type NeighborhoodData = {
-  coordinates: string;
-  radius: number;
-};
+interface City {
+  city_id: string;
+  city_name: string;
+}
 
-type CityData = {
-  center: string;
-  radius: number;
-  neighborhoods: Record<string, NeighborhoodData>;
-};
+interface Neighborhood {
+  neighborhood_id: string;
+  neighborhood_name: string;
+}
 
-const LOCATIONS: Record<string, CityData> = {
-  Bogota: {
-    center: "4.7110,-74.0721",
-    radius: 20, // City-wide radius in miles
-    neighborhoods: {
-      "Zona Rosa": { coordinates: "4.6700,-74.0550", radius: 2 },
-      "Chapinero": { coordinates: "4.6500,-74.0600", radius: 3 },
-      "Usaquen": { coordinates: "4.7000,-74.0300", radius: 4 },
-      "La Candelaria": { coordinates: "4.5950,-74.0750", radius: 1.5 },
-    },
-  },
-  Medellin: {
-    center: "6.2476,-75.5658",
-    radius: 15, // City-wide radius in miles
-    neighborhoods: {
-      "El Poblado": { coordinates: "6.2080,-75.5700", radius: 3 },
-      "Laureles": { coordinates: "6.2500,-75.5900", radius: 2.5 },
-      "Envigado": { coordinates: "6.1700,-75.5800", radius: 4 },
-      "Sabaneta": { coordinates: "6.1500,-75.6000", radius: 2 },
-    },
-  },
-};
+interface Subcategory {
+  subcategory_id: string;
+  subcategory_name: string;
+}
 
-const CATEGORIES = [
-  "muebles",
-  "decoracion",
-  "electrodomesticos",
-  "iluminacion",
-  "textiles",
-  "accesorios",
-  "jardin",
-  "cocina",
-  "sala",
-  "dormitorio",
-];
+const COLOMBIA_NAME = "Colombia";
+const DEFAULT_CATEGORY = "para la venta";
 
 export default function Home() {
   const router = useRouter();
   const [listings, setListings] = useState<ListingMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [allListings, setAllListings] = useState<ListingMetadata[]>([]);
+  const [currentBatch, setCurrentBatch] = useState(1);
+  const [total, setTotal] = useState(0);
   const [initialLoad, setInitialLoad] = useState(true);
 
-  // Filter state
-  const [city, setCity] = useState<string>("");
-  const [neighborhood, setNeighborhood] = useState<string>("");
-  const [category, setCategory] = useState<string>("");
+  // Location data from API
+  const [colombiaId, setColombiaId] = useState<string>("");
+  const [cities, setCities] = useState<City[]>([]);
+  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([]);
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [loadingNeighborhoods, setLoadingNeighborhoods] = useState(false);
+  const [loadingSubcategories, setLoadingSubcategories] = useState(false);
 
-  const itemsPerPage = 20;
+  // Filter state (using names for display, but we'll use IDs for API calls)
+  const [selectedCity, setSelectedCity] = useState<string>(""); // city_name
+  const [selectedCityId, setSelectedCityId] = useState<string>(""); // city_id
+  const [selectedNeighborhood, setSelectedNeighborhood] = useState<string>(""); // neighborhood_name
+  const [selectedNeighborhoodId, setSelectedNeighborhoodId] = useState<string>(""); // neighborhood_id
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string>(""); // subcategory_name
 
-  // Calculate pagination
-  const totalPages = Math.ceil(allListings.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const currentListings = allListings.slice(startIndex, endIndex);
-  const hasNextPage = currentPage < totalPages;
+  // Check if there are more batches
+  const hasMoreBatches = listings.length === 100;
 
-  // Get available neighborhoods based on selected city
-  const availableNeighborhoods = city
-    ? Object.keys(LOCATIONS[city]?.neighborhoods || {})
-    : [];
-
+  // Fetch Colombia's country_id and subcategories on mount
   useEffect(() => {
-    // Initial load with Bogota coordinates
-    fetchListings("4.7110,-74.0721", 600).then(() => {
-      setInitialLoad(false);
-    });
+    async function fetchInitialData() {
+      try {
+        // Fetch Colombia
+        const countriesResponse = await fetch("/api/locations/countries");
+        if (!countriesResponse.ok) {
+          throw new Error("Failed to fetch countries");
+        }
+        const countriesData = await countriesResponse.json();
+        const colombia = countriesData.countries.find(
+          (c: any) => c.country_name.toLowerCase() === COLOMBIA_NAME.toLowerCase()
+        );
+        if (colombia) {
+          setColombiaId(colombia.country_id);
+          // Fetch cities for Colombia
+          fetchCities(colombia.country_id);
+        } else {
+          setError("Colombia not found in database");
+        }
+
+        // Fetch subcategories for "para la venta"
+        const subcategoriesResponse = await fetch("/api/locations/subcategories");
+        if (!subcategoriesResponse.ok) {
+          throw new Error("Failed to fetch subcategories");
+        }
+        const subcategoriesData = await subcategoriesResponse.json();
+        setSubcategories(subcategoriesData.subcategories || []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load initial data");
+        console.error("Error fetching initial data:", err);
+      }
+    }
+    fetchInitialData();
   }, []);
 
-  async function fetchListings(coordinates: string, radius: number) {
+  // Fetch cities for Colombia
+  async function fetchCities(countryId: string) {
+    try {
+      setLoadingCities(true);
+      const response = await fetch(`/api/locations/cities?country_id=${countryId}`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch cities");
+      }
+      const data = await response.json();
+      setCities(data.cities || []);
+    } catch (err) {
+      console.error("Error fetching cities:", err);
+    } finally {
+      setLoadingCities(false);
+    }
+  }
+
+  // Fetch neighborhoods when city is selected
+  useEffect(() => {
+    if (selectedCityId) {
+      async function fetchNeighborhoodsForCity() {
+        try {
+          setLoadingNeighborhoods(true);
+          const response = await fetch(`/api/locations/neighborhoods?city_id=${selectedCityId}`);
+          if (!response.ok) {
+            throw new Error("Failed to fetch neighborhoods");
+          }
+          const data = await response.json();
+          setNeighborhoods(data.neighborhoods || []);
+        } catch (err) {
+          console.error("Error fetching neighborhoods:", err);
+        } finally {
+          setLoadingNeighborhoods(false);
+        }
+      }
+      fetchNeighborhoodsForCity();
+    } else {
+      setNeighborhoods([]);
+    }
+  }, [selectedCityId]);
+
+  async function fetchListings(batch: number = 1) {
     try {
       setLoading(true);
       setError(null);
+
+      const requestBody: any = {
+        country: COLOMBIA_NAME,
+        category: DEFAULT_CATEGORY, // Always use "para la venta"
+        batch,
+      };
+
+      if (selectedCity) {
+        requestBody.city = selectedCity;
+      }
+
+      if (selectedNeighborhood) {
+        requestBody.neighborhood = selectedNeighborhood;
+      }
 
       const response = await fetch("/api/listings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          coordinates,
-          radius,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -121,7 +175,8 @@ export default function Home() {
       const data = await response.json();
       const fetchedListings = data.listings || [];
       setListings(fetchedListings);
-      setCurrentPage(1); // Reset to first page on new search
+      setTotal(data.total || 0);
+      setCurrentBatch(data.batch || 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
       console.error("Error fetching listings:", err);
@@ -130,136 +185,72 @@ export default function Home() {
     }
   }
 
-  const handleCityToggle = (selectedCity: string) => {
-    if (city === selectedCity) {
+  const handleCityToggle = (cityName: string, cityId: string) => {
+    if (selectedCity === cityName) {
       // Unselect city
-      setCity("");
-      setNeighborhood(""); // Clear neighborhood when city is unselected
+      setSelectedCity("");
+      setSelectedCityId("");
+      setSelectedNeighborhood("");
+      setSelectedNeighborhoodId("");
     } else {
       // Select new city
-      setCity(selectedCity);
-      setNeighborhood(""); // Clear neighborhood when city changes
+      setSelectedCity(cityName);
+      setSelectedCityId(cityId);
+      setSelectedNeighborhood("");
+      setSelectedNeighborhoodId("");
     }
   };
 
-  const handleNeighborhoodToggle = (selectedNeighborhood: string) => {
-    if (neighborhood === selectedNeighborhood) {
-      setNeighborhood("");
+  const handleNeighborhoodToggle = (neighborhoodName: string, neighborhoodId: string) => {
+    if (selectedNeighborhood === neighborhoodName) {
+      setSelectedNeighborhood("");
+      setSelectedNeighborhoodId("");
     } else {
-      setNeighborhood(selectedNeighborhood);
+      setSelectedNeighborhood(neighborhoodName);
+      setSelectedNeighborhoodId(neighborhoodId);
     }
   };
 
-  const handleCategoryToggle = (selectedCategory: string) => {
-    if (category === selectedCategory) {
-      setCategory("");
+  const handleSubcategoryToggle = (subcategoryName: string) => {
+    if (selectedSubcategory === subcategoryName) {
+      setSelectedSubcategory("");
     } else {
-      setCategory(selectedCategory);
+      setSelectedSubcategory(subcategoryName);
     }
   };
 
-  const handleSearch = () => {
-    let coordinates: string;
-    let radius: number;
-
-    if (city && neighborhood) {
-      // Use neighborhood coordinates and radius
-      const cityData = LOCATIONS[city];
-      if (cityData) {
-        const neighborhoodData = cityData.neighborhoods[neighborhood];
-        if (neighborhoodData) {
-          coordinates = neighborhoodData.coordinates;
-          radius = neighborhoodData.radius;
-        } else {
-          // Fallback to city center
-          coordinates = cityData.center;
-          radius = cityData.radius;
-        }
-      } else {
-        coordinates = "4.7110,-74.0721";
-        radius = 600;
-      }
-    } else if (city) {
-      // Use city center coordinates and radius
-      const cityData = LOCATIONS[city];
-      if (cityData) {
-        coordinates = cityData.center;
-        radius = cityData.radius;
-      } else {
-        coordinates = "4.7110,-74.0721";
-        radius = 600;
-      }
-    } else {
-      // Default to Bogota
-      coordinates = "4.7110,-74.0721";
-      radius = 600;
+  // Initial load - fetch listings for Colombia
+  useEffect(() => {
+    if (colombiaId) {
+      fetchListings(1).then(() => {
+        setInitialLoad(false);
+      });
     }
-
-    fetchListings(coordinates, radius);
-  };
+  }, [colombiaId]);
 
   // Auto-search when city or neighborhood filters change (but not on initial load)
   useEffect(() => {
-    if (initialLoad) return; // Don't trigger search during initial load
+    if (initialLoad || !colombiaId) return; // Don't trigger search during initial load
 
-    let coordinates: string;
-    let radius: number;
+    setCurrentBatch(1); // Reset to first batch
+    fetchListings(1);
+  }, [selectedCity, selectedNeighborhood, initialLoad, colombiaId]);
 
-    if (city && neighborhood) {
-      // Use neighborhood coordinates and radius
-      const cityData = LOCATIONS[city];
-      if (cityData) {
-        const neighborhoodData = cityData.neighborhoods[neighborhood];
-        if (neighborhoodData) {
-          coordinates = neighborhoodData.coordinates;
-          radius = neighborhoodData.radius;
-        } else {
-          // Fallback to city center
-          coordinates = cityData.center;
-          radius = cityData.radius;
-        }
-      } else {
-        coordinates = "4.7110,-74.0721";
-        radius = 600;
-      }
-    } else if (city) {
-      // Use city center coordinates and radius
-      const cityData = LOCATIONS[city];
-      if (cityData) {
-        coordinates = cityData.center;
-        radius = cityData.radius;
-      } else {
-        coordinates = "4.7110,-74.0721";
-        radius = 600;
-      }
-    } else {
-      // Default to Bogota
-      coordinates = "4.7110,-74.0721";
-      radius = 600;
-    }
-
-    fetchListings(coordinates, radius);
-  }, [city, neighborhood, initialLoad]);
-
-  const handleNextPage = () => {
-    if (hasNextPage) {
-      setCurrentPage((prev) => prev + 1);
+  const handleNextBatch = () => {
+    if (hasMoreBatches) {
+      const nextBatch = currentBatch + 1;
+      setCurrentBatch(nextBatch);
+      fetchListings(nextBatch);
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
-  // Filter listings by category on the frontend (API doesn't filter by category)
-  useEffect(() => {
-    if (category) {
-      const filtered = listings.filter(
-        (listing) => listing.category.toLowerCase() === category.toLowerCase()
-      );
-      setAllListings(filtered);
-    } else {
-      setAllListings(listings);
-    }
-    setCurrentPage(1); // Reset to first page when filter changes
-  }, [category, listings]);
+  // Filter listings by subcategory on the frontend
+  const filteredListings = selectedSubcategory
+    ? listings.filter(
+        (listing) => listing.subcategory?.toLowerCase() === selectedSubcategory.toLowerCase()
+      )
+    : listings;
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -267,69 +258,36 @@ export default function Home() {
 
       <main className="max-w-7xl mx-auto px-4 py-8">
         {/* Search Filters - Button Based */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-8">
+        <div className="flex flex-col md:flex-row justify-between bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 mb-8">
           {/* City Section */}
-          <div className="mb-6">
+          <div className="mb-6 w-1/4">
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
               Ciudad
             </h3>
             <div className="flex flex-wrap gap-2">
-              {Object.keys(LOCATIONS).map((cityName) => {
-                const isSelected = city === cityName;
-                return (
-                  <button
-                    key={cityName}
-                    type="button"
-                    onClick={() => handleCityToggle(cityName)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                      isSelected
-                        ? "bg-blue-500 text-white hover:bg-blue-600"
-                        : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600"
-                    }`}
-                  >
-                    <span>{cityName}</span>
-                    {isSelected && (
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Neighborhood Section */}
-          <div className="mb-6">
-            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-              Barrio
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {city ? (
-                availableNeighborhoods.map((neigh) => {
-                  const isSelected = neighborhood === neigh;
+              {loadingCities ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  Cargando ciudades...
+                </p>
+              ) : cities.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  No hay ciudades disponibles
+                </p>
+              ) : (
+                cities.map((city) => {
+                  const isSelected = selectedCity === city.city_name;
                   return (
                     <button
-                      key={neigh}
+                      key={city.city_id}
                       type="button"
-                      onClick={() => handleNeighborhoodToggle(neigh)}
+                      onClick={() => handleCityToggle(city.city_name, city.city_id)}
                       className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
                         isSelected
                           ? "bg-blue-500 text-white hover:bg-blue-600"
                           : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600"
                       }`}
                     >
-                      <span>{neigh}</span>
+                      <span>{city.city_name}</span>
                       {isSelected && (
                         <svg
                           className="w-4 h-4"
@@ -348,53 +306,118 @@ export default function Home() {
                     </button>
                   );
                 })
-              ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
-                  Selecciona una ciudad para ver los barrios
-                </p>
               )}
             </div>
           </div>
 
-          {/* Category Section */}
-          <div>
+          {/* Neighborhood Section */}
+          <div className="mb-6 w-1/4">
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-              Categoría
+              Barrio
             </h3>
             <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map((cat) => {
-                const isSelected = category === cat;
-                const displayName = cat.charAt(0).toUpperCase() + cat.slice(1);
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => handleCategoryToggle(cat)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                      isSelected
-                        ? "bg-blue-500 text-white hover:bg-blue-600"
-                        : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600"
-                    }`}
-                  >
-                    <span>{displayName}</span>
-                    {isSelected && (
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
+              {!selectedCity ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  Selecciona una ciudad para ver los barrios
+                </p>
+              ) : loadingNeighborhoods ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  Cargando barrios...
+                </p>
+              ) : neighborhoods.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  No hay barrios disponibles para esta ciudad
+                </p>
+              ) : (
+                neighborhoods.map((neighborhood) => {
+                  const isSelected = selectedNeighborhood === neighborhood.neighborhood_name;
+                  return (
+                    <button
+                      key={neighborhood.neighborhood_id}
+                      type="button"
+                      onClick={() =>
+                        handleNeighborhoodToggle(
+                          neighborhood.neighborhood_name,
+                          neighborhood.neighborhood_id
+                        )
+                      }
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        isSelected
+                          ? "bg-blue-500 text-white hover:bg-blue-600"
+                          : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600"
+                      }`}
+                    >
+                      <span>{neighborhood.neighborhood_name}</span>
+                      {isSelected && (
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Subcategory Section */}
+          <div className="w-1/2">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+              Tipo de artículo (Subcategoría)
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {loadingSubcategories ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  Cargando tipos de artículo...
+                </p>
+              ) : subcategories.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  No hay tipos de artículo disponibles
+                </p>
+              ) : (
+                subcategories.map((subcategory) => {
+                  const isSelected = selectedSubcategory === subcategory.subcategory_name;
+                  return (
+                    <button
+                      key={subcategory.subcategory_id}
+                      type="button"
+                      onClick={() => handleSubcategoryToggle(subcategory.subcategory_name)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        isSelected
+                          ? "bg-blue-500 text-white hover:bg-blue-600"
+                          : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600"
+                      }`}
+                    >
+                      <span>{subcategory.subcategory_name}</span>
+                      {isSelected && (
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
@@ -418,7 +441,7 @@ export default function Home() {
         {/* Listings Grid */}
         {!loading && (
           <>
-            {currentListings.length === 0 ? (
+            {filteredListings.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-lg text-gray-600 dark:text-gray-400">
                   No listings found.
@@ -427,7 +450,7 @@ export default function Home() {
             ) : (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                  {currentListings.map((listing) => (
+                  {filteredListings.map((listing) => (
                     <ListingCard key={listing.listing_id} listing={listing} />
                   ))}
                 </div>
@@ -435,18 +458,19 @@ export default function Home() {
                 {/* Pagination */}
                 <div className="flex justify-center items-center gap-4 py-8">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Page {currentPage} of {totalPages || 1}
+                    Showing {filteredListings.length} of {total} listings
+                    {total > 0 && ` (Batch ${currentBatch})`}
                   </p>
                   <button
-                    onClick={handleNextPage}
-                    disabled={!hasNextPage}
+                    onClick={handleNextBatch}
+                    disabled={!hasMoreBatches}
                     className={`rounded-lg px-6 py-2 font-medium transition-colors ${
-                      hasNextPage
+                      hasMoreBatches
                         ? "bg-blue-500 text-white hover:bg-blue-600"
                         : "bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-gray-700 dark:text-gray-500"
                     }`}
                   >
-                    Next Page
+                    Load More
                   </button>
                 </div>
               </>
@@ -494,22 +518,20 @@ function ListingCard({ listing }: { listing: ListingMetadata }) {
           <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
             ${listing.price}
           </span>
-          <span
-            className={`px-2 py-1 rounded-full text-xs ${
-              listing.status === "active"
-                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
-            }`}
-          >
-            {listing.status}
-          </span>
+          {listing.subcategory && (
+            <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 capitalize">
+              {listing.subcategory}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-          <span className="capitalize">{listing.category}</span>
-          <span>•</span>
-          <span>
-            {new Date(listing.listing_date).toLocaleDateString()}
-          </span>
+          {listing.city && <span>{listing.city}</span>}
+          {listing.neighborhood && (
+            <>
+              {listing.city && <span>•</span>}
+              <span>{listing.neighborhood}</span>
+            </>
+          )}
         </div>
       </div>
     </div>

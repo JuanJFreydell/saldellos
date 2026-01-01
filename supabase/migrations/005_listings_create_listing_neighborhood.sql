@@ -1,5 +1,5 @@
-create table if not exists neighborhoods (
+create table if not exists listing_neighborhoods (
   neighborhood_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT,
+  neighborhood_name TEXT,
   city_id TEXT
 );

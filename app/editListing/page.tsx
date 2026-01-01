@@ -8,11 +8,37 @@ interface ListingData {
   listing_id: string;
   title: string;
   description: string;
-  address: string;
-  coordinates: string;
+  subcategory: string | null;
+  category: string | null;
   price: string;
-  category: string;
-  photos: string[];
+  thumbnail: string;
+  coordinates: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  country: string | null;
+  pictureURLs: string[];
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+}
+
+interface Country {
+  country_id: string;
+  country_name: string;
+}
+
+interface City {
+  city_id: string;
+  city_name: string;
+}
+
+interface Neighborhood {
+  neighborhood_id: string;
+  neighborhood_name: string;
+}
+
+interface Subcategory {
+  subcategory_id: string;
+  subcategory_name: string;
 }
 
 function EditListingContent() {
@@ -26,57 +52,155 @@ function EditListingContent() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const [formData, setFormData] = useState<ListingData>({
+  // Location data
+  const [countries, setCountries] = useState<Country[]>([]);
+  const [cities, setCities] = useState<City[]>([]);
+  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([]);
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
+
+  // Loading states
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [loadingNeighborhoods, setLoadingNeighborhoods] = useState(false);
+  const [loadingSubcategories, setLoadingSubcategories] = useState(false);
+
+  const [formData, setFormData] = useState({
     listing_id: "",
     title: "",
     description: "",
-    address: "",
+    address_line_1: "",
+    address_line_2: "",
     coordinates: "",
     price: "",
-    category: "",
-    photos: [""],
+    country: "",
+    country_id: "",
+        city: "",
+        city_id: "",
+        neighborhood: "",
+        neighborhood_id: "",
+        subcategory_id: "",
+    pictures: [""],
   });
 
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/");
     } else if (status === "authenticated" && listingId) {
-      fetchListingData();
+      fetchInitialData();
     }
   }, [status, router, listingId]);
 
-  async function fetchListingData() {
+  async function fetchInitialData() {
     if (!listingId) return;
 
     try {
       setLoading(true);
       setError(null);
 
-      // Fetch full listing data
+      // Fetch countries and subcategories first
+      const [countriesRes, subcategoriesRes] = await Promise.all([
+        fetch("/api/locations/countries"),
+        fetch("/api/locations/subcategories"), // Fetch subcategories for "para la venta"
+      ]);
+
+      if (!countriesRes.ok || !subcategoriesRes.ok) {
+        throw new Error("Failed to fetch initial data");
+      }
+
+      const countriesData = await countriesRes.json();
+      const subcategoriesData = await subcategoriesRes.json();
+      setCountries(countriesData.countries || []);
+      setSubcategories(subcategoriesData.subcategories || []);
+
+      // Fetch listing data
       const response = await fetch(`/api/manageListings?listing_id=${listingId}`);
       if (!response.ok) {
         throw new Error("Failed to fetch listing");
       }
 
       const data = await response.json();
-      const listing = data.listing;
+      const listing: ListingData = data.listing;
 
       if (!listing) {
         throw new Error("Listing not found");
+      }
+
+      // Find country, city, neighborhood IDs based on names
+      let countryId = "";
+      let cityId = "";
+      let neighborhoodId = "";
+      let subcategoryId = "";
+
+      // Find country ID
+      if (listing.country) {
+        const country = countriesData.countries.find(
+          (c: Country) => c.country_name.toLowerCase() === listing.country!.toLowerCase()
+        );
+        if (country) {
+          countryId = country.country_id;
+          // Fetch cities for this country
+          const citiesRes = await fetch(`/api/locations/cities?country_id=${countryId}`);
+          if (citiesRes.ok) {
+            const citiesData = await citiesRes.json();
+            setCities(citiesData.cities || []);
+
+            // Find city ID
+            if (listing.city) {
+              const city = citiesData.cities.find(
+                (c: City) => c.city_name.toLowerCase() === listing.city!.toLowerCase()
+              );
+              if (city) {
+                cityId = city.city_id;
+                // Fetch neighborhoods for this city
+                const neighborhoodsRes = await fetch(`/api/locations/neighborhoods?city_id=${cityId}`);
+                if (neighborhoodsRes.ok) {
+                  const neighborhoodsData = await neighborhoodsRes.json();
+                  setNeighborhoods(neighborhoodsData.neighborhoods || []);
+
+                  // Find neighborhood ID
+                  if (listing.neighborhood) {
+                    const neighborhood = neighborhoodsData.neighborhoods.find(
+                      (n: Neighborhood) => n.neighborhood_name.toLowerCase() === listing.neighborhood!.toLowerCase()
+                    );
+                    if (neighborhood) {
+                      neighborhoodId = neighborhood.neighborhood_id;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Find subcategory ID
+      if (listing.subcategory) {
+        const subcategory = subcategoriesData.subcategories.find(
+          (s: Subcategory) => s.subcategory_name.toLowerCase() === listing.subcategory!.toLowerCase()
+        );
+        if (subcategory) {
+          subcategoryId = subcategory.subcategory_id;
+        }
       }
 
       setFormData({
         listing_id: listingId,
         title: listing.title || "",
         description: listing.description || "",
-        address: listing.address || "",
+        address_line_1: listing.address_line_1 || "",
+        address_line_2: listing.address_line_2 || "",
         coordinates: listing.coordinates || "",
         price: listing.price || "",
-        category: listing.category || "",
-        photos: listing.photos && listing.photos.length > 0 
-          ? listing.photos 
-          : listing.thumbnail 
-            ? [listing.thumbnail] 
+        country: listing.country || "",
+        country_id: countryId,
+        city: listing.city || "",
+        city_id: cityId,
+        neighborhood: listing.neighborhood || "",
+        neighborhood_id: neighborhoodId,
+        subcategory_id: subcategoryId,
+        pictures: listing.pictureURLs && listing.pictureURLs.length > 0
+          ? listing.pictureURLs
+          : listing.thumbnail
+            ? [listing.thumbnail]
             : [""],
       });
     } catch (err) {
@@ -87,27 +211,112 @@ function EditListingContent() {
     }
   }
 
+  // Fetch cities when country is selected
+  useEffect(() => {
+    if (formData.country_id) {
+      fetchCities(formData.country_id);
+    } else {
+      setCities([]);
+      setNeighborhoods([]);
+      setFormData((prev) => ({
+        ...prev,
+        city: "",
+        city_id: "",
+        neighborhood: "",
+        neighborhood_id: "",
+      }));
+    }
+  }, [formData.country_id]);
+
+  // Fetch neighborhoods when city is selected
+  useEffect(() => {
+    if (formData.city_id) {
+      fetchNeighborhoods(formData.city_id);
+    } else {
+      setNeighborhoods([]);
+      setFormData((prev) => ({
+        ...prev,
+        neighborhood: "",
+        neighborhood_id: "",
+      }));
+    }
+  }, [formData.city_id]);
+
+
+  async function fetchCities(countryId: string) {
+    try {
+      setLoadingCities(true);
+      const response = await fetch(`/api/locations/cities?country_id=${countryId}`);
+      if (!response.ok) throw new Error("Failed to fetch cities");
+      const data = await response.json();
+      setCities(data.cities || []);
+    } catch (err) {
+      console.error("Error fetching cities:", err);
+    } finally {
+      setLoadingCities(false);
+    }
+  }
+
+  async function fetchNeighborhoods(cityId: string) {
+    try {
+      setLoadingNeighborhoods(true);
+      const response = await fetch(`/api/locations/neighborhoods?city_id=${cityId}`);
+      if (!response.ok) throw new Error("Failed to fetch neighborhoods");
+      const data = await response.json();
+      setNeighborhoods(data.neighborhoods || []);
+    } catch (err) {
+      console.error("Error fetching neighborhoods:", err);
+    } finally {
+      setLoadingNeighborhoods(false);
+    }
+  }
+
+
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+
+    if (name === "country") {
+      const country = countries.find((c) => c.country_id === value);
+      setFormData((prev) => ({
+        ...prev,
+        country: country?.country_name || "",
+        country_id: value,
+      }));
+    } else if (name === "city") {
+      const city = cities.find((c) => c.city_id === value);
+      setFormData((prev) => ({
+        ...prev,
+        city: city?.city_name || "",
+        city_id: value,
+      }));
+    } else if (name === "neighborhood") {
+      const neighborhood = neighborhoods.find((n) => n.neighborhood_id === value);
+      setFormData((prev) => ({
+        ...prev,
+        neighborhood: neighborhood?.neighborhood_name || "",
+        neighborhood_id: value,
+      }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handlePhotoChange = (index: number, value: string) => {
-    const newPhotos = [...formData.photos];
+    const newPhotos = [...formData.pictures];
     newPhotos[index] = value;
-    setFormData((prev) => ({ ...prev, photos: newPhotos }));
+    setFormData((prev) => ({ ...prev, pictures: newPhotos }));
   };
 
   const addPhotoField = () => {
-    setFormData((prev) => ({ ...prev, photos: [...prev.photos, ""] }));
+    setFormData((prev) => ({ ...prev, pictures: [...prev.pictures, ""] }));
   };
 
   const removePhotoField = (index: number) => {
-    if (formData.photos.length > 1) {
-      const newPhotos = formData.photos.filter((_, i) => i !== index);
-      setFormData((prev) => ({ ...prev, photos: newPhotos }));
+    if (formData.pictures.length > 1) {
+      const newPhotos = formData.pictures.filter((_, i) => i !== index);
+      setFormData((prev) => ({ ...prev, pictures: newPhotos }));
     }
   };
 
@@ -119,7 +328,7 @@ function EditListingContent() {
 
     try {
       // Filter out empty photo URLs
-      const validPhotos = formData.photos.filter((photo) => photo.trim() !== "");
+      const validPhotos = formData.pictures.filter((photo) => photo.trim() !== "");
 
       // Build update payload - only include fields that have values
       const updatePayload: any = {
@@ -128,11 +337,18 @@ function EditListingContent() {
 
       if (formData.title.trim()) updatePayload.title = formData.title;
       if (formData.description.trim()) updatePayload.description = formData.description;
-      if (formData.address.trim()) updatePayload.address = formData.address;
+      if (formData.address_line_1.trim()) updatePayload.address_line_1 = formData.address_line_1;
+      if (formData.address_line_2.trim()) updatePayload.address_line_2 = formData.address_line_2;
       if (formData.coordinates.trim()) updatePayload.coordinates = formData.coordinates;
       if (formData.price.trim()) updatePayload.price = formData.price;
-      if (formData.category.trim()) updatePayload.category = formData.category;
-      if (validPhotos.length > 0) updatePayload.photos = validPhotos;
+      if (formData.subcategory_id) updatePayload.subcategory_id = formData.subcategory_id;
+      if (validPhotos.length > 0) {
+        updatePayload.thumbnail = validPhotos[0];
+        updatePayload.pictures = validPhotos;
+      }
+      if (formData.country) updatePayload.country = formData.country;
+      if (formData.city) updatePayload.city = formData.city;
+      if (formData.neighborhood) updatePayload.neighborhood = formData.neighborhood;
 
       const response = await fetch("/api/manageListings", {
         method: "PATCH",
@@ -229,22 +445,115 @@ function EditListingContent() {
             />
           </div>
 
-          {/* Address */}
+          {/* Country */}
           <div>
             <label
-              htmlFor="address"
+              htmlFor="country"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
             >
-              Address
+              Country
+            </label>
+            <select
+              id="country"
+              name="country"
+              value={formData.country_id}
+              onChange={handleInputChange}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Select a country</option>
+              {countries.map((country) => (
+                <option key={country.country_id} value={country.country_id}>
+                  {country.country_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* City */}
+          <div>
+            <label
+              htmlFor="city"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              City {formData.country_id ? "(optional)" : ""}
+            </label>
+            <select
+              id="city"
+              name="city"
+              value={formData.city_id}
+              onChange={handleInputChange}
+              disabled={!formData.country_id || loadingCities}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100"
+            >
+              <option value="">Select a city</option>
+              {cities.map((city) => (
+                <option key={city.city_id} value={city.city_id}>
+                  {city.city_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Neighborhood */}
+          <div>
+            <label
+              htmlFor="neighborhood"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Neighborhood {formData.city_id ? "(optional)" : ""}
+            </label>
+            <select
+              id="neighborhood"
+              name="neighborhood"
+              value={formData.neighborhood_id}
+              onChange={handleInputChange}
+              disabled={!formData.city_id || loadingNeighborhoods}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100"
+            >
+              <option value="">Select a neighborhood</option>
+              {neighborhoods.map((neighborhood) => (
+                <option key={neighborhood.neighborhood_id} value={neighborhood.neighborhood_id}>
+                  {neighborhood.neighborhood_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Address Line 1 */}
+          <div>
+            <label
+              htmlFor="address_line_1"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Address Line 1
             </label>
             <input
               type="text"
-              id="address"
-              name="address"
-              value={formData.address}
+              id="address_line_1"
+              name="address_line_1"
+              value={formData.address_line_1}
               onChange={handleInputChange}
               className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="Enter full address"
+              placeholder="Enter street address"
+            />
+          </div>
+
+          {/* Address Line 2 */}
+          <div>
+            <label
+              htmlFor="address_line_2"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Address Line 2 (optional)
+            </label>
+            <input
+              type="text"
+              id="address_line_2"
+              name="address_line_2"
+              value={formData.address_line_2}
+              onChange={handleInputChange}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              placeholder="Apartment, suite, etc. (optional)"
             />
           </div>
 
@@ -263,7 +572,7 @@ function EditListingContent() {
               value={formData.coordinates}
               onChange={handleInputChange}
               className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="e.g., 40.7128,-74.0060"
+              placeholder="e.g., 4.7110,-74.0721"
             />
           </div>
 
@@ -286,32 +595,28 @@ function EditListingContent() {
             />
           </div>
 
-          {/* Category */}
+          {/* Subcategory */}
           <div>
             <label
-              htmlFor="category"
+              htmlFor="subcategory_id"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
             >
-              Category
+              Tipo de artículo (Subcategoría)
             </label>
             <select
-              id="category"
-              name="category"
-              value={formData.category}
+              id="subcategory_id"
+              name="subcategory_id"
+              value={formData.subcategory_id}
               onChange={handleInputChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              disabled={loadingSubcategories}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100"
             >
-              <option value="">Seleccione una categoría</option>
-              <option value="muebles">Muebles</option>
-              <option value="decoracion">Decoración</option>
-              <option value="electrodomesticos">Electrodomésticos</option>
-              <option value="iluminacion">Iluminación</option>
-              <option value="textiles">Textiles</option>
-              <option value="accesorios">Accesorios</option>
-              <option value="jardin">Jardín</option>
-              <option value="cocina">Cocina</option>
-              <option value="sala">Sala</option>
-              <option value="dormitorio">Dormitorio</option>
+              <option value="">Seleccione un tipo de artículo</option>
+              {subcategories.map((subcategory) => (
+                <option key={subcategory.subcategory_id} value={subcategory.subcategory_id}>
+                  {subcategory.subcategory_name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -320,7 +625,7 @@ function EditListingContent() {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Photo URLs
             </label>
-            {formData.photos.map((photo, index) => (
+            {formData.pictures.map((photo, index) => (
               <div key={index} className="mb-2 flex gap-2">
                 <input
                   type="url"
@@ -329,7 +634,7 @@ function EditListingContent() {
                   className="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   placeholder="https://example.com/photo.jpg"
                 />
-                {formData.photos.length > 1 && (
+                {formData.pictures.length > 1 && (
                   <button
                     type="button"
                     onClick={() => removePhotoField(index)}
@@ -374,13 +679,14 @@ function EditListingContent() {
 
 export default function EditListingPage() {
   return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-lg">Loading...</p>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <p className="text-lg">Loading...</p>
+        </div>
+      }
+    >
       <EditListingContent />
     </Suspense>
   );
 }
-

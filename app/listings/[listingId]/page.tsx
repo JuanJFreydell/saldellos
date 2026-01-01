@@ -5,34 +5,19 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import Header from "../../components/Header";
 
-interface ListingData {
-  listing_id: string;
-  owner_id: string;
-  title: string;
-  description: string;
-  address: string;
-  neighborhood_id: string | null;
-  listing_date: string;
-  number_of_prints: string;
-  number_of_visits: string;
-  status: string;
-}
-
-interface ListingMetadata {
-  listing_id: string;
-  title: string;
-  thumbnail: string;
-  coordinates: string;
-  price: string;
-  listing_date: string;
-  status: string;
-  category: string;
-}
-
 interface ListingResponse {
   listing_id: string;
-  listing_data: ListingData;
-  listing_metadata: ListingMetadata;
+  description: string;
+  title: string;
+  subcategory: string | null;
+  category: string | null;
+  price: string;
+  thumbnail: string;
+  coordinates: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  country: string | null;
+  pictureURLs: string[];
 }
 
 export default function ListingDetailPage() {
@@ -177,8 +162,6 @@ export default function ListingDetailPage() {
     );
   }
 
-  const { listing_data, listing_metadata } = listing;
-
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
       <Header />
@@ -195,11 +178,12 @@ export default function ListingDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left Column - Images */}
           <div className="space-y-4">
+            {/* Main thumbnail or first photo */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
-              {listing_metadata.thumbnail ? (
+              {listing.thumbnail || (listing.pictureURLs && listing.pictureURLs.length > 0) ? (
                 <img
-                  src={listing_metadata.thumbnail}
-                  alt={listing_metadata.title}
+                  src={listing.thumbnail || listing.pictureURLs[0]}
+                  alt={listing.title}
                   className="w-full h-96 object-cover"
                 />
               ) : (
@@ -208,6 +192,24 @@ export default function ListingDetailPage() {
                 </div>
               )}
             </div>
+            
+            {/* Additional photos gallery */}
+            {listing.pictureURLs && listing.pictureURLs.length > 1 && (
+              <div className="grid grid-cols-4 gap-2">
+                {listing.pictureURLs.slice(1).map((photoUrl, index) => (
+                  <div
+                    key={index}
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+                  >
+                    <img
+                      src={photoUrl}
+                      alt={`${listing.title} - Foto ${index + 2}`}
+                      className="w-full h-24 object-cover"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Right Column - Details */}
@@ -215,21 +217,17 @@ export default function ListingDetailPage() {
             {/* Title and Price */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
               <h1 className="text-3xl font-bold text-black dark:text-zinc-50 mb-4">
-                {listing_metadata.title || listing_data.title}
+                {listing.title}
               </h1>
               <div className="flex items-center justify-between mb-4">
                 <span className="text-4xl font-bold text-blue-600 dark:text-blue-400">
-                  ${listing_metadata.price}
+                  ${listing.price}
                 </span>
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    listing_metadata.status === "active"
-                      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                      : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {listing_metadata.status === "active" ? "Activo" : listing_metadata.status}
-                </span>
+                {listing.category && (
+                  <span className="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 capitalize">
+                    {listing.category}
+                  </span>
+                )}
               </div>
               {/* Contact Seller Button */}
               {status === "authenticated" && session ? (
@@ -293,25 +291,29 @@ export default function ListingDetailPage() {
               )}
             </div>
 
-            {/* Category and Date */}
+            {/* Category and Subcategory */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    Categoría
-                  </h3>
-                  <p className="text-lg font-semibold text-black dark:text-zinc-50 capitalize">
-                    {listing_metadata.category}
-                  </p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    Fecha de publicación
-                  </h3>
-                  <p className="text-lg font-semibold text-black dark:text-zinc-50">
-                    {new Date(listing_metadata.listing_date).toLocaleDateString("es-CO")}
-                  </p>
-                </div>
+                {listing.category && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      Categoría
+                    </h3>
+                    <p className="text-lg font-semibold text-black dark:text-zinc-50 capitalize">
+                      {listing.category}
+                    </p>
+                  </div>
+                )}
+                {listing.subcategory && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      Subcategoría
+                    </h3>
+                    <p className="text-lg font-semibold text-black dark:text-zinc-50 capitalize">
+                      {listing.subcategory}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -321,7 +323,7 @@ export default function ListingDetailPage() {
                 Descripción
               </h2>
               <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {listing_data.description || "No hay descripción disponible."}
+                {listing.description || "No hay descripción disponible."}
               </p>
             </div>
 
@@ -331,73 +333,60 @@ export default function ListingDetailPage() {
                 Ubicación
               </h2>
               <div className="space-y-3">
-                {listing_data.address && (
+                {listing.country && (
                   <div>
                     <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
-                      Dirección
+                      País
                     </h3>
                     <p className="text-gray-700 dark:text-gray-300">
-                      {listing_data.address}
+                      {listing.country}
                     </p>
                   </div>
                 )}
-                {listing_metadata.coordinates && (
+                {listing.city && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      Ciudad
+                    </h3>
+                    <p className="text-gray-700 dark:text-gray-300">
+                      {listing.city}
+                    </p>
+                  </div>
+                )}
+                {listing.neighborhood && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      Barrio
+                    </h3>
+                    <p className="text-gray-700 dark:text-gray-300">
+                      {listing.neighborhood}
+                    </p>
+                  </div>
+                )}
+                {listing.coordinates && (
                   <div>
                     <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
                       Coordenadas
                     </h3>
                     <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">
-                      {listing_metadata.coordinates}
-                    </p>
-                  </div>
-                )}
-                {listing_data.neighborhood_id && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
-                      Barrio ID
-                    </h3>
-                    <p className="text-gray-700 dark:text-gray-300">
-                      {listing_data.neighborhood_id}
+                      {listing.coordinates}
                     </p>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Statistics */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold text-black dark:text-zinc-50 mb-4">
-                Estadísticas
-              </h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    Impresiones
-                  </h3>
-                  <p className="text-2xl font-bold text-black dark:text-zinc-50">
-                    {listing_data.number_of_prints || "0"}
-                  </p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    Visitas
-                  </h3>
-                  <p className="text-2xl font-bold text-black dark:text-zinc-50">
-                    {listing_data.number_of_visits || "0"}
-                  </p>
-                </div>
+            {/* Photos count */}
+            {listing.pictureURLs && listing.pictureURLs.length > 0 && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <h2 className="text-xl font-semibold text-black dark:text-zinc-50 mb-2">
+                  Fotos
+                </h2>
+                <p className="text-gray-700 dark:text-gray-300">
+                  {listing.pictureURLs.length} {listing.pictureURLs.length === 1 ? "foto" : "fotos"} disponible{listing.pictureURLs.length === 1 ? "" : "s"}
+                </p>
               </div>
-            </div>
-
-            {/* Listing ID (for reference) */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
-                ID del Listado
-              </h3>
-              <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">
-                {listing.listing_id}
-              </p>
-            </div>
+            )}
           </div>
         </div>
         </div>

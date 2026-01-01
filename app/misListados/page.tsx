@@ -168,7 +168,7 @@ function ListingCard({
                 </h2>
                 <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
                   <span className="flex items-center gap-1">
-                    <span className="font-medium">Category:</span> {listing.category}
+                    <span className="font-medium">Tipo de artículo:</span> {listing.category || "N/A"}
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="font-medium">Status:</span>

@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getListingById } from "@/lib/getListingById";
 
 export async function GET(request: Request) {
   try {
-    if (!supabaseAdmin) {
-      return NextResponse.json(
-        { error: "Database not configured" },
-        { status: 500 }
-      );
-    }
-
     // Get listing_id from query parameters
     const { searchParams } = new URL(request.url);
     const listingId = searchParams.get("listing_id");
@@ -21,43 +14,16 @@ export async function GET(request: Request) {
       );
     }
 
-    // Fetch listing data from listings table
-    const { data: listingData, error: listingError } = await supabaseAdmin
-      .from("listings")
-      .select("*")
-      .eq("listing_id", listingId)
-      .single();
+    const listing = await getListingById(listingId);
 
-    if (listingError || !listingData) {
+    if (!listing) {
       return NextResponse.json(
         { error: "Listing not found" },
         { status: 404 }
       );
     }
 
-    // Fetch listing metadata from listings_meta_data table
-    const { data: listingMetadata, error: metadataError } = await supabaseAdmin
-      .from("listings_meta_data")
-      .select("*")
-      .eq("listing_id", listingId)
-      .single();
-
-    if (metadataError || !listingMetadata) {
-      return NextResponse.json(
-        { error: "Listing metadata not found" },
-        { status: 404 }
-      );
-    }
-
-    // Combine both data sources
-    return NextResponse.json(
-      {
-        listing_id: listingId,
-        listing_data: listingData,
-        listing_metadata: listingMetadata,
-      },
-      { status: 200 }
-    );
+    return NextResponse.json(listing, { status: 200 });
   } catch (error) {
     console.error("Error in getListingById endpoint:", error);
     return NextResponse.json(
@@ -66,4 +32,3 @@ export async function GET(request: Request) {
     );
   }
 }
-

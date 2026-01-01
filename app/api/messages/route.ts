@@ -98,15 +98,28 @@ export async function GET(request: Request) {
             : null;
         }
 
-        // Get listing metadata
+        // Get listing metadata using the same logic as listingById
         let listingMetadata = null;
         if (conversation.listing_id) {
-          const { data: metadata } = await adminClient
-            .from("listings_meta_data")
-            .select("*")
-            .eq("listing_id", conversation.listing_id)
-            .single();
-          listingMetadata = metadata;
+          try {
+            const { getListingById } = await import("@/lib/getListingById");
+            const listing = await getListingById(conversation.listing_id);
+            if (listing) {
+              // Return simplified metadata matching frontend expectations
+              listingMetadata = {
+                listing_id: listing.listing_id,
+                title: listing.title,
+                thumbnail: listing.thumbnail,
+                price: listing.price,
+                category: listing.category,
+                coordinates: listing.coordinates,
+                status: "active", // Assume active if listing exists
+              };
+            }
+          } catch (err) {
+            console.error("Error fetching listing metadata:", err);
+            // Continue without metadata if fetch fails
+          }
         }
 
         // Get all messages for this conversation, ordered by time_sent

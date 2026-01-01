@@ -263,17 +263,12 @@ export default function ListarPage() {
               required
               className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             >
-              <option value="">Seleccione una categoría</option>
-              <option value="muebles">Muebles</option>
-              <option value="decoracion">Decoración</option>
-              <option value="electrodomesticos">Electrodomésticos</option>
-              <option value="iluminacion">Iluminación</option>
-              <option value="textiles">Textiles</option>
-              <option value="accesorios">Accesorios</option>
-              <option value="jardin">Jardín</option>
-              <option value="cocina">Cocina</option>
-              <option value="sala">Sala</option>
-              <option value="dormitorio">Dormitorio</option>
+              <option value="">Select a category</option>
+              <option value="apartment">Apartment</option>
+              <option value="house">House</option>
+              <option value="room">Room</option>
+              <option value="studio">Studio</option>
+              <option value="other">Other</option>
             </select>
           </div>
 
