@@ -15,13 +15,13 @@ export default function LoggedUserPage() {
     if (status === "unauthenticated") {
       router.push("/");
     } else if (status === "authenticated" && session?.user?.email) {
-      fetchUserData(session.user.email);
+      fetchUserData();
     }
   }, [status, session, router]);
 
-  async function fetchUserData(email: string) {
+  async function fetchUserData() {
     try {
-      const response = await fetch(`/api/user?email=${encodeURIComponent(email)}`);
+      const response = await fetch("/api/user");
       if (response.ok) {
         const data = await response.json();
         setUserData(data);

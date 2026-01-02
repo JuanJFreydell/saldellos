@@ -12,13 +12,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get email from query params
-    const { searchParams } = new URL(request.url);
-    const email = searchParams.get("email");
-
-    if (!email || email !== session.user.email) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    // Use email from session (more secure - no need for query parameter)
+    const email = session.user.email;
 
     if (!supabaseAdmin) {
       return NextResponse.json(
