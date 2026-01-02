@@ -323,7 +323,7 @@ export default function Home() {
               ) : loadingNeighborhoods ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400 italic">
                   Cargando barrios...
-                </p>
+          </p>
               ) : neighborhoods.length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400 italic">
                   No hay barrios disponibles para esta ciudad

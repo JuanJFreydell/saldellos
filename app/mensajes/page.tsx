@@ -90,7 +90,7 @@ export default function MensagesPage() {
     try {
       // Only show loading spinner on initial load, not on polling updates
       if (!silent) {
-        setLoading(true);
+      setLoading(true);
       }
       setError(null);
 
@@ -117,12 +117,12 @@ export default function MensagesPage() {
     } catch (err) {
       // Only show error on initial load, not on polling failures
       if (!silent) {
-        setError(err instanceof Error ? err.message : "An error occurred");
+      setError(err instanceof Error ? err.message : "An error occurred");
       }
       console.error("Error fetching conversations:", err);
     } finally {
       if (!silent) {
-        setLoading(false);
+      setLoading(false);
       }
     }
   }

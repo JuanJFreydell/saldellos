@@ -14,6 +14,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 -- Since you're using NextAuth (not Supabase Auth), you have two options:
 -- Option 1: Block all public access (recommended for NextAuth)
 -- Use server-side Supabase client with SECRET key for all operations
+DROP POLICY IF EXISTS "Block all public access" ON users;
 CREATE POLICY "Block all public access" ON users
   FOR ALL USING (false);
 

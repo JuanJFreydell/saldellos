@@ -7,5 +7,5 @@ CREATE TABLE IF NOT EXISTS listings (
   subcategory_id UUID,
   title TEXT,
   status TEXT,
-  thumbnail TEXT,
+  thumbnail TEXT
 );

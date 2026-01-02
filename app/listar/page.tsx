@@ -4,6 +4,26 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, FormEvent, useEffect } from "react";
 
+interface Country {
+  country_id: string;
+  country_name: string;
+}
+
+interface City {
+  city_id: string;
+  city_name: string;
+}
+
+interface Neighborhood {
+  neighborhood_id: string;
+  neighborhood_name: string;
+}
+
+interface Subcategory {
+  subcategory_id: string;
+  subcategory_name: string;
+}
+
 export default function ListarPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -11,22 +31,141 @@ export default function ListarPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // Location data
+  const [countries, setCountries] = useState<Country[]>([]);
+  const [cities, setCities] = useState<City[]>([]);
+  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([]);
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
+
+  // Loading states
+  const [loadingCountries, setLoadingCountries] = useState(false);
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [loadingNeighborhoods, setLoadingNeighborhoods] = useState(false);
+  const [loadingSubcategories, setLoadingSubcategories] = useState(false);
+
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    address: "",
+    address_line_1: "",
+    address_line_2: "",
     coordinates: "",
     price: "",
-    category: "",
-    photos: [""], // Start with one photo field
+    country: "",
+    country_id: "",
+    city: "",
+    city_id: "",
+    neighborhood: "",
+    neighborhood_id: "",
+    subcategory_id: "",
+    pictures: [""], // Start with one photo field
   });
 
-  // Redirect if not authenticated (using useEffect to avoid render-time state update)
+  // Redirect if not authenticated
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/");
     }
   }, [status, router]);
+
+  // Fetch countries and subcategories on mount
+  useEffect(() => {
+    if (status === "authenticated") {
+      fetchCountries();
+      fetchSubcategories();
+    }
+  }, [status]);
+
+  // Fetch cities when country is selected
+  useEffect(() => {
+    if (formData.country_id) {
+      fetchCities(formData.country_id);
+    } else {
+      setCities([]);
+      setNeighborhoods([]);
+      setFormData((prev) => ({
+        ...prev,
+        city: "",
+        city_id: "",
+        neighborhood: "",
+        neighborhood_id: "",
+      }));
+    }
+  }, [formData.country_id]);
+
+  // Fetch neighborhoods when city is selected
+  useEffect(() => {
+    if (formData.city_id) {
+      fetchNeighborhoods(formData.city_id);
+    } else {
+      setNeighborhoods([]);
+      setFormData((prev) => ({
+        ...prev,
+        neighborhood: "",
+        neighborhood_id: "",
+      }));
+    }
+  }, [formData.city_id]);
+
+  async function fetchCountries() {
+    try {
+      setLoadingCountries(true);
+      const response = await fetch("/api/locations/countries");
+      if (!response.ok) throw new Error("Failed to fetch countries");
+      const data = await response.json();
+      setCountries(data.countries || []);
+    } catch (err) {
+      console.error("Error fetching countries:", err);
+      setError("Failed to load countries");
+    } finally {
+      setLoadingCountries(false);
+    }
+  }
+
+  async function fetchCities(countryId: string) {
+    try {
+      setLoadingCities(true);
+      const response = await fetch(`/api/locations/cities?country_id=${countryId}`);
+      if (!response.ok) throw new Error("Failed to fetch cities");
+      const data = await response.json();
+      setCities(data.cities || []);
+    } catch (err) {
+      console.error("Error fetching cities:", err);
+      setError("Failed to load cities");
+    } finally {
+      setLoadingCities(false);
+    }
+  }
+
+  async function fetchNeighborhoods(cityId: string) {
+    try {
+      setLoadingNeighborhoods(true);
+      const response = await fetch(`/api/locations/neighborhoods?city_id=${cityId}`);
+      if (!response.ok) throw new Error("Failed to fetch neighborhoods");
+      const data = await response.json();
+      setNeighborhoods(data.neighborhoods || []);
+    } catch (err) {
+      console.error("Error fetching neighborhoods:", err);
+      setError("Failed to load neighborhoods");
+    } finally {
+      setLoadingNeighborhoods(false);
+    }
+  }
+
+  async function fetchSubcategories() {
+    try {
+      setLoadingSubcategories(true);
+      // Fetch subcategories for "para la venta" category (no category_id needed)
+      const response = await fetch("/api/locations/subcategories");
+      if (!response.ok) throw new Error("Failed to fetch subcategories");
+      const data = await response.json();
+      setSubcategories(data.subcategories || []);
+    } catch (err) {
+      console.error("Error fetching subcategories:", err);
+      setError("Failed to load subcategories");
+    } finally {
+      setLoadingSubcategories(false);
+    }
+  }
 
   // Show loading state
   if (status === "loading") {
@@ -37,7 +176,7 @@ export default function ListarPage() {
     );
   }
 
-  // Don't render form if not authenticated (redirect is in progress)
+  // Don't render form if not authenticated
   if (status === "unauthenticated") {
     return null;
   }
@@ -46,23 +185,47 @@ export default function ListarPage() {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    if (name === "country") {
+      const country = countries.find((c) => c.country_id === value);
+      setFormData((prev) => ({
+        ...prev,
+        country: country?.country_name || "",
+        country_id: value,
+      }));
+    } else if (name === "city") {
+      const city = cities.find((c) => c.city_id === value);
+      setFormData((prev) => ({
+        ...prev,
+        city: city?.city_name || "",
+        city_id: value,
+      }));
+    } else if (name === "neighborhood") {
+      const neighborhood = neighborhoods.find((n) => n.neighborhood_id === value);
+      setFormData((prev) => ({
+        ...prev,
+        neighborhood: neighborhood?.neighborhood_name || "",
+        neighborhood_id: value,
+      }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handlePhotoChange = (index: number, value: string) => {
-    const newPhotos = [...formData.photos];
+    const newPhotos = [...formData.pictures];
     newPhotos[index] = value;
-    setFormData((prev) => ({ ...prev, photos: newPhotos }));
+    setFormData((prev) => ({ ...prev, pictures: newPhotos }));
   };
 
   const addPhotoField = () => {
-    setFormData((prev) => ({ ...prev, photos: [...prev.photos, ""] }));
+    setFormData((prev) => ({ ...prev, pictures: [...prev.pictures, ""] }));
   };
 
   const removePhotoField = (index: number) => {
-    if (formData.photos.length > 1) {
-      const newPhotos = formData.photos.filter((_, i) => i !== index);
-      setFormData((prev) => ({ ...prev, photos: newPhotos }));
+    if (formData.pictures.length > 1) {
+      const newPhotos = formData.pictures.filter((_, i) => i !== index);
+      setFormData((prev) => ({ ...prev, pictures: newPhotos }));
     }
   };
 
@@ -73,7 +236,7 @@ export default function ListarPage() {
     setSuccess(false);
 
     // Filter out empty photo URLs
-    const validPhotos = formData.photos.filter((photo) => photo.trim() !== "");
+    const validPhotos = formData.pictures.filter((photo) => photo.trim() !== "");
 
     if (validPhotos.length === 0) {
       setError("At least one photo is required");
@@ -81,21 +244,52 @@ export default function ListarPage() {
       return;
     }
 
+    if (!session?.user?.id) {
+      setError("User session not found");
+      setLoading(false);
+      return;
+    }
+
+    // Get user_id from session
     try {
+      const userResponse = await fetch("/api/user");
+      if (!userResponse.ok) {
+        throw new Error("Failed to fetch user data");
+      }
+      const userData = await userResponse.json();
+      const ownerId = userData.user_id;
+
+      // Prepare request body matching API expectations
+      const requestBody: any = {
+        owner_id: ownerId,
+        title: formData.title,
+        description: formData.description,
+        address_line_1: formData.address_line_1,
+        coordinates: formData.coordinates,
+        price: formData.price,
+        subcategory_id: formData.subcategory_id,
+        thumbnail: validPhotos[0], // First photo is thumbnail
+        pictures: validPhotos,
+        country: formData.country,
+      };
+
+      // Add optional fields
+      if (formData.address_line_2.trim()) {
+        requestBody.address_line_2 = formData.address_line_2;
+      }
+      if (formData.city) {
+        requestBody.city = formData.city;
+      }
+      if (formData.neighborhood) {
+        requestBody.neighborhood = formData.neighborhood;
+      }
+
       const response = await fetch("/api/manageListings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          title: formData.title,
-          description: formData.description,
-          address: formData.address,
-          coordinates: formData.coordinates,
-          price: formData.price,
-          category: formData.category,
-          photos: validPhotos,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -109,14 +303,21 @@ export default function ListarPage() {
       setFormData({
         title: "",
         description: "",
-        address: "",
+        address_line_1: "",
+        address_line_2: "",
         coordinates: "",
         price: "",
-        category: "",
-        photos: [""],
+        country: "",
+        country_id: "",
+        city: "",
+        city_id: "",
+        neighborhood: "",
+        neighborhood_id: "",
+        subcategory_id: "",
+        pictures: [""],
       });
 
-      // Optionally redirect after success
+      // Redirect after success
       setTimeout(() => {
         router.push("/loggedUserPage");
       }, 2000);
@@ -187,23 +388,118 @@ export default function ListarPage() {
             />
           </div>
 
-          {/* Address */}
+          {/* Country */}
           <div>
             <label
-              htmlFor="address"
+              htmlFor="country"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
             >
-              Address *
+              Country *
+            </label>
+            <select
+              id="country"
+              name="country"
+              value={formData.country_id}
+              onChange={handleInputChange}
+              required
+              disabled={loadingCountries}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100"
+            >
+              <option value="">Select a country</option>
+              {countries.map((country) => (
+                <option key={country.country_id} value={country.country_id}>
+                  {country.country_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* City */}
+          <div>
+            <label
+              htmlFor="city"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              City {formData.country_id ? "(optional)" : ""}
+            </label>
+            <select
+              id="city"
+              name="city"
+              value={formData.city_id}
+              onChange={handleInputChange}
+              disabled={!formData.country_id || loadingCities}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100"
+            >
+              <option value="">Select a city</option>
+              {cities.map((city) => (
+                <option key={city.city_id} value={city.city_id}>
+                  {city.city_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Neighborhood */}
+          <div>
+            <label
+              htmlFor="neighborhood"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Neighborhood {formData.city_id ? "(optional)" : ""}
+            </label>
+            <select
+              id="neighborhood"
+              name="neighborhood"
+              value={formData.neighborhood_id}
+              onChange={handleInputChange}
+              disabled={!formData.city_id || loadingNeighborhoods}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100"
+            >
+              <option value="">Select a neighborhood</option>
+              {neighborhoods.map((neighborhood) => (
+                <option key={neighborhood.neighborhood_id} value={neighborhood.neighborhood_id}>
+                  {neighborhood.neighborhood_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Address Line 1 */}
+          <div>
+            <label
+              htmlFor="address_line_1"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Address Line 1 *
             </label>
             <input
               type="text"
-              id="address"
-              name="address"
-              value={formData.address}
+              id="address_line_1"
+              name="address_line_1"
+              value={formData.address_line_1}
               onChange={handleInputChange}
               required
               className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="Enter full address"
+              placeholder="Enter street address"
+            />
+          </div>
+
+          {/* Address Line 2 */}
+          <div>
+            <label
+              htmlFor="address_line_2"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Address Line 2 (optional)
+            </label>
+            <input
+              type="text"
+              id="address_line_2"
+              name="address_line_2"
+              value={formData.address_line_2}
+              onChange={handleInputChange}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              placeholder="Apartment, suite, etc. (optional)"
             />
           </div>
 
@@ -223,7 +519,7 @@ export default function ListarPage() {
               onChange={handleInputChange}
               required
               className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="e.g., 40.7128,-74.0060"
+              placeholder="e.g., 4.7110,-74.0721"
             />
           </div>
 
@@ -247,28 +543,29 @@ export default function ListarPage() {
             />
           </div>
 
-          {/* Category */}
+          {/* Subcategory */}
           <div>
             <label
-              htmlFor="category"
+              htmlFor="subcategory_id"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
             >
-              Category *
+              Tipo de artículo * (Subcategoría)
             </label>
             <select
-              id="category"
-              name="category"
-              value={formData.category}
+              id="subcategory_id"
+              name="subcategory_id"
+              value={formData.subcategory_id}
               onChange={handleInputChange}
               required
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              disabled={loadingSubcategories}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100"
             >
-              <option value="">Select a category</option>
-              <option value="apartment">Apartment</option>
-              <option value="house">House</option>
-              <option value="room">Room</option>
-              <option value="studio">Studio</option>
-              <option value="other">Other</option>
+              <option value="">Seleccione un tipo de artículo</option>
+              {subcategories.map((subcategory) => (
+                <option key={subcategory.subcategory_id} value={subcategory.subcategory_id}>
+                  {subcategory.subcategory_name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -277,7 +574,7 @@ export default function ListarPage() {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Photo URLs * (at least one required)
             </label>
-            {formData.photos.map((photo, index) => (
+            {formData.pictures.map((photo, index) => (
               <div key={index} className="mb-2 flex gap-2">
                 <input
                   type="url"
@@ -287,7 +584,7 @@ export default function ListarPage() {
                   className="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   placeholder="https://example.com/photo.jpg"
                 />
-                {formData.photos.length > 1 && (
+                {formData.pictures.length > 1 && (
                   <button
                     type="button"
                     onClick={() => removePhotoField(index)}
@@ -329,4 +626,3 @@ export default function ListarPage() {
     </div>
   );
 }
-
