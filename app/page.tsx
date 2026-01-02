@@ -258,7 +258,7 @@ export default function Home() {
 
       <main className="max-w-7xl mx-auto px-4 py-8">
         {/* Search Filters - Button Based */}
-        <div className="flex flex-col md:flex-row justify-between bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 mb-8">
+        <div className="flex flex-col md:h-[200px] md:flex-row justify-between bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 mb-8 overflow-clip">
           {/* City Section */}
           <div className="mb-6 w-1/4">
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -371,11 +371,19 @@ export default function Home() {
           </div>
 
           {/* Subcategory Section */}
-          <div className="w-1/2">
+          <div className="w-1/2 h-max">
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
               Tipo de artículo (Subcategoría)
             </h3>
-            <div className="flex flex-wrap gap-2">
+            {/* Container with fixed height and vertical scroll */}
+            <div
+              className="flex flex-wrap gap-2"
+              style={{
+                maxHeight: "200px",
+                overflowY: "auto",
+                paddingRight: "4px" // Provide some space for scrollbar if needed
+              }}
+            >
               {loadingSubcategories ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400 italic">
                   Cargando tipos de artículo...
