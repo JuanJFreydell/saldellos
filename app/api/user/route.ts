@@ -34,9 +34,17 @@ export async function GET(request: Request) {
       .eq("email", email)
       .single();
 
-    if (error) {
+    if (error || !data) {
       console.error("Error fetching user:", error);
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Check if user account is active
+    if (data.status !== "active") {
+      return NextResponse.json(
+        { error: "Account is not active" },
+        { status: 403 }
+      );
     }
 
     return NextResponse.json(data);
